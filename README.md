@@ -1,24 +1,19 @@
 # ccusage-ui-dashboard
 
-A local, single-file HTML dashboard that visualises your **Claude Code** usage —
-cost, tokens, model split — across day / week / month / year, with a year filter.
+A local visual dashboard for **Claude Code** usage — cost, tokens, model split — across day / week / month / year.
 
-This repo is the **distributable form** of the dashboard. After cloning it on
-any machine, a single `npm run setup` copies the dashboard files into
-`~/.claude/dashboard/` and registers a `/<prefix>-usage` slash command for
-Claude Code (you'll be prompted for the prefix — default `my`, so the command
-becomes `/my-usage`). [`ccusage`](https://github.com/ryoppippi/ccusage) is
-resolved automatically via `npx` on first run — no global install needed.
-
-The dashboard runs entirely on your machine. It reads local Claude Code logs
-(`~/.claude/projects/*/*.jsonl`) via `ccusage`, embeds the parsed data into a
-self-contained HTML file, and opens it in your browser. No server, no
-telemetry, no external API calls — except the Chart.js CDN script tag.
+> **Main feature:** type `/<prefix>-usage` inside any Claude Code session and get an inline cost & token summary _right in the chat_, plus the full visual dashboard opens in your browser — all without leaving your terminal.
 
 ![Dashboard example](./example.jpg)
 
+The dashboard runs entirely on your machine. It reads local Claude Code logs
+(`~/.claude/projects/*/*.jsonl`) via [`ccusage`](https://github.com/ryoppippi/ccusage),
+embeds the parsed data into a self-contained HTML file, and opens it in your browser.
+No server, no telemetry, no external API calls — except the Chart.js CDN script tag.
+
 ## Features
 
+- **`/<prefix>-usage` slash command** — type it in any Claude Code session to get an inline cost & token summary in the chat and open the full visual dashboard in one step.
 - **KPIs**: total cost, total tokens, cache reads, number of periods.
 - **Period tabs**: `Today` · `Daily` · `Weekly` · `Monthly`.
 - **Year dropdown** (right of the tabs) — populated from all years available in your data.
@@ -26,9 +21,8 @@ telemetry, no external API calls — except the Chart.js CDN script tag.
 - **Stacked bar chart** of cost per period, broken down by model, with **stable model colors** across all tabs (the priciest model always keeps the same color slot).
 - **Doughnut** with cost share by model.
 - **Detailed table** with input / output / cache-write / cache-read tokens per period.
-- AI-assisted disclosure footer (EU AI Act Art. 50 transparency).
+- **Light / dark theme toggle** — sun/moon button in the header, preference persisted in `localStorage`.
 - Inline markdown summary printed to stdout — Today / Last 7 days / This month / All time + top models by cost.
-- **`/<prefix>-usage`** Claude Code slash command (prefix chosen at setup, default `my`) for one-keystroke rebuild + inline summary in chat.
 
 ## Requirements
 
@@ -232,6 +226,27 @@ All data stays local. The only network request the dashboard makes is to
 `cdn.jsdelivr.net` for `chart.js`. If you want a fully offline build, download
 `chart.umd.min.js` next to `template.html` and replace the `<script src="...">`
 URL with a relative path.
+
+## Changelog
+
+### v1.1.0
+
+- **Light / dark theme toggle** — sun/moon button in the dashboard header; chart colors update on switch; preference persisted in `localStorage`.
+- Slash command prompt trimmed to reduce token usage on each `/ok-usage` invocation.
+
+### v1.0.0
+
+Initial public release.
+
+- Self-contained HTML dashboard (no server, no telemetry).
+- `/<prefix>-usage` Claude Code slash command — inline cost summary in chat + visual dashboard in browser.
+- KPI cards (total cost, tokens, cache reads, periods) + min/avg/max per period.
+- Period tabs: Today / Daily / Weekly / Monthly with year filter dropdown.
+- Stacked bar chart + doughnut (cost by model, stable color slots across tabs).
+- Detailed breakdown table (input / output / cache-write / cache-read tokens).
+- `npx ccusage-ui-dashboard` one-shot install from npm.
+- `--no-open` and `--no-summary` flags for `build.sh`.
+- VS Code Simple Browser tip when running inside a VS Code terminal.
 
 ## Licence
 

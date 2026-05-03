@@ -72,11 +72,49 @@
   .footer a { color: var(--text); text-decoration: none; border-bottom: 1px dashed var(--border); }
   .footer a:hover { border-bottom-color: var(--accent); }
   @media (max-width: 800px) { .kpis { grid-template-columns: repeat(2, 1fr); } .grid { grid-template-columns: 1fr; } }
+
+  [data-theme="light"] {
+    --bg: #f5f7fa;
+    --panel: #ffffff;
+    --panel-2: #eef0f4;
+    --text: #1a1d23;
+    --muted: #6b7280;
+    --accent: #d97757;
+    --border: #dde1e9;
+  }
+  .header-row { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; justify-content: space-between; }
+  .header-row h1 { margin: 0; }
+  .theme-toggle {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    padding: 6px 8px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    line-height: 1;
+    transition: color .15s, border-color .15s;
+  }
+  .theme-toggle:hover { color: var(--text); border-color: var(--accent); }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>__USER_NAME__ Claude Usage Dashboard</h1>
+  <div class="header-row">
+    <h1>__USER_NAME__ Claude Usage Dashboard</h1>
+    <button id="theme-toggle" class="theme-toggle" title="Toggle theme" aria-label="Toggle theme">
+      <svg id="icon-sun" xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+        <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+      </svg>
+      <svg id="icon-moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+    </button>
+  </div>
   <div class="sub" id="sub"></div>
 
   <div class="kpis">
@@ -145,6 +183,16 @@ const COLORS = ["#d97757", "#5b9dd9", "#7ec27e", "#c084fc", "#f5b342", "#e87a90"
 const fmtUsd = n => "$" + (n || 0).toFixed(2);
 const fmtNum = n => (n || 0).toLocaleString("en-US");
 const shortModel = m => m.replace(/^claude-/, "").replace(/-\d{8}$/, "");
+
+function chartColors() {
+  const light = document.documentElement.getAttribute("data-theme") === "light";
+  return {
+    legend: light ? "#374151" : "#cfd3da",
+    ticks:  light ? "#6b7280" : "#8a93a3",
+    grid:   light ? "#e5e7eb" : "#262b35",
+    panel:  light ? "#ffffff" : "#171a21",
+  };
+}
 
 const KEY_BY_VIEW = { today: "date", daily: "date", weekly: "week", monthly: "month" };
 const todayStr = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD local
@@ -236,6 +284,7 @@ function render(view) {
   const periodLabel = { today: "today", daily: "day", weekly: "week", monthly: "month" }[view] || view;
   document.getElementById("bar-title").textContent = `Cost per ${periodLabel} (by model)`;
 
+  const cc = chartColors();
   if (barChart) barChart.destroy();
   barChart = new Chart(document.getElementById("bar"), {
     type: "bar",
@@ -244,12 +293,12 @@ function render(view) {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { labels: { color: "#cfd3da", boxWidth: 12 } },
+        legend: { labels: { color: cc.legend, boxWidth: 12 } },
         tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmtUsd(c.parsed.y)}` } },
       },
       scales: {
-        x: { stacked: true, ticks: { color: "#8a93a3" }, grid: { color: "#262b35" } },
-        y: { stacked: true, ticks: { color: "#8a93a3", callback: v => "$" + v }, grid: { color: "#262b35" } },
+        x: { stacked: true, ticks: { color: cc.ticks }, grid: { color: cc.grid } },
+        y: { stacked: true, ticks: { color: cc.ticks, callback: v => "$" + v }, grid: { color: cc.grid } },
       },
     },
   });
@@ -263,14 +312,14 @@ function render(view) {
       datasets: [{
         data: byModel.map(([, v]) => +v.toFixed(4)),
         backgroundColor: byModel.map(([m]) => colorFor(m)),
-        borderColor: "#171a21",
+        borderColor: cc.panel,
       }],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { position: "bottom", labels: { color: "#cfd3da", boxWidth: 12 } },
+        legend: { position: "bottom", labels: { color: cc.legend, boxWidth: 12 } },
         tooltip: { callbacks: { label: c => `${c.label}: ${fmtUsd(c.parsed)}` } },
       },
     },
@@ -321,6 +370,26 @@ yearSelect.disabled = true;
 
 document.getElementById("sub").textContent = "Generated at " + DATA.generatedAt + " · data from local Claude logs (~/.claude/projects)";
 document.getElementById("footer-year").textContent = new Date().getFullYear();
+
+// Theme toggle
+const iconSun  = document.getElementById("icon-sun");
+const iconMoon = document.getElementById("icon-moon");
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  iconSun.style.display  = theme === "light" ? "none"  : "";
+  iconMoon.style.display = theme === "light" ? ""      : "none";
+  localStorage.setItem("ccusage-theme", theme);
+}
+
+applyTheme(localStorage.getItem("ccusage-theme") || "dark");
+
+document.getElementById("theme-toggle").addEventListener("click", () => {
+  const next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+  applyTheme(next);
+  render(currentView());
+});
+
 render("today");
 </script>
 </body>

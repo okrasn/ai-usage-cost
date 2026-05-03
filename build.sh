@@ -80,7 +80,7 @@ def fmt_n(x):   return f"{x:,}"
 def short(m):   return re.sub(r"-\d{8}$", "", m.replace("claude-", ""))
 
 print()
-print("## OK Claude Usage — quick summary")
+print("## Claude Usage — quick summary")
 print()
 print("| Period | Cost | Tokens |")
 print("|---|---:|---:|")
