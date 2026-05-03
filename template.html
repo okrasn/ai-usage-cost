@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8" />
+<title>__USER_NAME__ Claude Usage Dashboard</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1f242d;
+    --text: #e6e8ec;
+    --muted: #8a93a3;
+    --accent: #d97757;
+    --border: #262b35;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  h1 { margin: 0 0 4px; font-size: 22px; font-weight: 600; }
+  .sub { color: var(--muted); margin-bottom: 24px; font-size: 12px; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .kpi .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  .kpi .value { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .kpis-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+  .tabs-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  .tabs { display: flex; gap: 4px; }
+  .tab {
+    background: var(--panel); color: var(--muted); border: 1px solid var(--border);
+    padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px;
+  }
+  .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .year-select {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    padding: 8px 12px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    appearance: none; padding-right: 28px;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%238a93a3' d='M0 0l5 6 5-6z'/></svg>");
+    background-repeat: no-repeat; background-position: right 10px center;
+  }
+  .year-select:disabled { opacity: .4; cursor: not-allowed; }
+  .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card h3 { margin: 0 0 12px; font-size: 13px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
+  canvas { max-height: 360px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr:hover { background: var(--panel-2); }
+  .footer {
+    margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap;
+    justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .footer .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--panel-2); color: var(--text); font-size: 11px;
+    text-transform: uppercase; letter-spacing: .04em;
+  }
+  .footer .badge::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+  }
+  .footer a { color: var(--text); text-decoration: none; border-bottom: 1px dashed var(--border); }
+  .footer a:hover { border-bottom-color: var(--accent); }
+  @media (max-width: 800px) { .kpis { grid-template-columns: repeat(2, 1fr); } .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>__USER_NAME__ Claude Usage Dashboard</h1>
+  <div class="sub" id="sub"></div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="label">Total cost</div><div class="value" id="kpi-cost">—</div></div>
+    <div class="kpi"><div class="label">Total tokens</div><div class="value" id="kpi-tokens">—</div></div>
+    <div class="kpi"><div class="label">Cache read</div><div class="value" id="kpi-cache">—</div></div>
+    <div class="kpi"><div class="label">Periods</div><div class="value" id="kpi-periods">—</div></div>
+  </div>
+
+  <div class="tabs-row">
+    <div class="tabs">
+      <button class="tab active" data-view="today">Today</button>
+      <button class="tab" data-view="daily">Daily</button>
+      <button class="tab" data-view="weekly">Weekly</button>
+      <button class="tab" data-view="monthly">Monthly</button>
+    </div>
+    <select id="year-select" class="year-select" title="Filter by year"></select>
+  </div>
+
+  <div class="kpis-stats">
+    <div class="kpi"><div class="label">Min cost / period</div><div class="value" id="kpi-min">—</div></div>
+    <div class="kpi"><div class="label">Avg cost / period</div><div class="value" id="kpi-avg">—</div></div>
+    <div class="kpi"><div class="label">Max cost / period</div><div class="value" id="kpi-max">—</div></div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3 id="bar-title">Cost per period (by model)</h3>
+      <canvas id="bar"></canvas>
+    </div>
+    <div class="card">
+      <h3>Cost share by model</h3>
+      <canvas id="doughnut"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Breakdown</h3>
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th>Period</th>
+          <th class="num">Cost ($)</th>
+          <th class="num">Input</th>
+          <th class="num">Output</th>
+          <th class="num">Cache write</th>
+          <th class="num">Cache read</th>
+          <th>Models</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <footer class="footer">
+    <span><a href="https://github.com/okrasn/ccusage-ui-dashboard" target="_blank" rel="noopener">GitHub</a> &middot; <a href="https://www.npmjs.com/package/ccusage-ui-dashboard" target="_blank" rel="noopener">npm</a></span>
+    <span>&copy; <span id="footer-year"></span> Claude Usage Dashboard</span>
+    <span>Built with <a href="https://claude.com" target="_blank" rel="noopener">Claude</a> &middot; Data: local Claude Code logs</span>
+  </footer>
+</div>
+
+<script>
+const DATA = __DATA__;
+
+const COLORS = ["#d97757", "#5b9dd9", "#7ec27e", "#c084fc", "#f5b342", "#e87a90", "#4dd0e1", "#a3a3a3"];
+const fmtUsd = n => "$" + (n || 0).toFixed(2);
+const fmtNum = n => (n || 0).toLocaleString("en-US");
+const shortModel = m => m.replace(/^claude-/, "").replace(/-\d{8}$/, "");
+
+const KEY_BY_VIEW = { today: "date", daily: "date", weekly: "week", monthly: "month" };
+const todayStr = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD local
+let barChart, doughnutChart;
+
+// Stable color per model: assigned once from the union of models across all views,
+// ordered by total lifetime cost desc, so the priciest model keeps slot 0 across tabs.
+const MODEL_COLOR = (() => {
+  const totals = new Map();
+  for (const view of ["daily", "weekly", "monthly"]) {
+    for (const r of (DATA[view] || [])) {
+      for (const b of (r.modelBreakdowns || [])) {
+        totals.set(b.modelName, (totals.get(b.modelName) || 0) + (b.cost || 0));
+      }
+    }
+  }
+  const ordered = [...totals.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const map = new Map();
+  ordered.forEach(([name], i) => map.set(name, COLORS[i % COLORS.length]));
+  return map;
+})();
+const colorFor = m => MODEL_COLOR.get(m) || "#a3a3a3";
+
+function rowsForView(view) {
+  if (view === "today") {
+    const t = todayStr();
+    return (DATA.daily || []).filter(r => r.date === t);
+  }
+  const key = KEY_BY_VIEW[view];
+  const rows = DATA[view] || [];
+  return rows.filter(r => (r[key] || "").startsWith(selectedYear + "-"));
+}
+
+function collectYears() {
+  const ys = new Set();
+  for (const view of ["daily", "weekly", "monthly"]) {
+    const key = KEY_BY_VIEW[view];
+    for (const r of (DATA[view] || [])) {
+      const v = r[key];
+      if (v) ys.add(v.slice(0, 4));
+    }
+  }
+  return [...ys].sort((a, b) => b.localeCompare(a));
+}
+
+const YEARS = collectYears();
+const currentYear = String(new Date().getFullYear());
+let selectedYear = YEARS.includes(currentYear) ? currentYear : (YEARS[0] || currentYear);
+
+function aggregateByModel(rows) {
+  const map = new Map();
+  for (const r of rows) for (const b of (r.modelBreakdowns || [])) {
+    map.set(b.modelName, (map.get(b.modelName) || 0) + (b.cost || 0));
+  }
+  return [...map.entries()].sort((a, b) => b[1] - a[1]);
+}
+
+function render(view) {
+  const rows = rowsForView(view);
+  const keyField = KEY_BY_VIEW[view];
+
+  const totalCost   = rows.reduce((s, r) => s + (r.totalCost || 0), 0);
+  const totalTokens = rows.reduce((s, r) => s + (r.totalTokens || 0), 0);
+  const cacheRead   = rows.reduce((s, r) => s + (r.cacheReadTokens || 0), 0);
+  document.getElementById("kpi-cost").textContent    = fmtUsd(totalCost);
+  document.getElementById("kpi-tokens").textContent  = fmtNum(totalTokens);
+  document.getElementById("kpi-cache").textContent   = fmtNum(cacheRead);
+  document.getElementById("kpi-periods").textContent = rows.length;
+
+  const costs = rows.map(r => r.totalCost || 0);
+  const minC = costs.length ? Math.min(...costs) : 0;
+  const maxC = costs.length ? Math.max(...costs) : 0;
+  const avgC = costs.length ? totalCost / costs.length : 0;
+  document.getElementById("kpi-min").textContent = fmtUsd(minC);
+  document.getElementById("kpi-avg").textContent = fmtUsd(avgC);
+  document.getElementById("kpi-max").textContent = fmtUsd(maxC);
+
+  const allModels = [...new Set(rows.flatMap(r => (r.modelBreakdowns || []).map(b => b.modelName)))];
+  const labels = rows.map(r => r[keyField]);
+  const datasets = allModels.map(m => ({
+    label: shortModel(m),
+    backgroundColor: colorFor(m),
+    data: rows.map(r => {
+      const b = (r.modelBreakdowns || []).find(x => x.modelName === m);
+      return b ? +b.cost.toFixed(4) : 0;
+    }),
+  }));
+
+  const periodLabel = { today: "today", daily: "day", weekly: "week", monthly: "month" }[view] || view;
+  document.getElementById("bar-title").textContent = `Cost per ${periodLabel} (by model)`;
+
+  if (barChart) barChart.destroy();
+  barChart = new Chart(document.getElementById("bar"), {
+    type: "bar",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: "#cfd3da", boxWidth: 12 } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmtUsd(c.parsed.y)}` } },
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: "#8a93a3" }, grid: { color: "#262b35" } },
+        y: { stacked: true, ticks: { color: "#8a93a3", callback: v => "$" + v }, grid: { color: "#262b35" } },
+      },
+    },
+  });
+
+  const byModel = aggregateByModel(rows);
+  if (doughnutChart) doughnutChart.destroy();
+  doughnutChart = new Chart(document.getElementById("doughnut"), {
+    type: "doughnut",
+    data: {
+      labels: byModel.map(([m]) => shortModel(m)),
+      datasets: [{
+        data: byModel.map(([, v]) => +v.toFixed(4)),
+        backgroundColor: byModel.map(([m]) => colorFor(m)),
+        borderColor: "#171a21",
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "bottom", labels: { color: "#cfd3da", boxWidth: 12 } },
+        tooltip: { callbacks: { label: c => `${c.label}: ${fmtUsd(c.parsed)}` } },
+      },
+    },
+  });
+
+  const tbody = document.querySelector("#tbl tbody");
+  tbody.innerHTML = "";
+  [...rows].reverse().forEach(r => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${r[keyField]}</td>
+      <td class="num">${fmtUsd(r.totalCost)}</td>
+      <td class="num">${fmtNum(r.inputTokens)}</td>
+      <td class="num">${fmtNum(r.outputTokens)}</td>
+      <td class="num">${fmtNum(r.cacheCreationTokens)}</td>
+      <td class="num">${fmtNum(r.cacheReadTokens)}</td>
+      <td>${(r.modelsUsed || []).map(shortModel).join(", ")}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+const yearSelect = document.getElementById("year-select");
+yearSelect.innerHTML = YEARS.map(y => `<option value="${y}"${y === selectedYear ? " selected" : ""}>${y}</option>`).join("")
+  || `<option value="${selectedYear}" selected>${selectedYear}</option>`;
+
+function currentView() {
+  const active = document.querySelector(".tab.active");
+  return active ? active.dataset.view : "today";
+}
+
+yearSelect.addEventListener("change", () => {
+  selectedYear = yearSelect.value;
+  render(currentView());
+});
+
+document.querySelectorAll(".tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    yearSelect.disabled = btn.dataset.view === "today";
+    render(btn.dataset.view);
+  });
+});
+
+// initial state: Today is active by default, so disable the year selector
+yearSelect.disabled = true;
+
+document.getElementById("sub").textContent = "Generated at " + DATA.generatedAt + " · data from local Claude logs (~/.claude/projects)";
+document.getElementById("footer-year").textContent = new Date().getFullYear();
+render("today");
+</script>
+</body>
+</html>

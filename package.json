@@ -1,0 +1,57 @@
+{
+  "name": "ccusage-ui-dashboard",
+  "version": "1.0.0",
+  "private": false,
+  "description": "Local visual dashboard for Claude Code usage analytics (cost & tokens by day/week/month/model). Reads local Claude logs via ccusage package; renders a self-contained HTML dashboard with Chart.js — no server, no telemetry. Ships with a /<prefix>-usage slash command for Claude Code.",
+  "license": "MIT",
+  "author": "Oleksandr Krasnokutskyi <okrasn.dev@gmail.com>",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "ccusage",
+    "dashboard",
+    "analytics",
+    "cost-tracking",
+    "slash-command"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/okrasn/ccusage-ui-dashboard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/okrasn/ccusage-ui-dashboard/issues"
+  },
+  "homepage": "https://github.com/okrasn/ccusage-ui-dashboard#readme",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "bin": {
+    "ccusage-ui-dashboard": "bin/install.sh"
+  },
+  "dependencies": {
+    "ccusage": ">=18.0.0"
+  },
+  "scripts": {
+    "setup": "bash ./scripts/setup.sh",
+    "copy-dashboard": "bash ./scripts/copy-dashboard.sh",
+    "copy-command": "bash ./scripts/copy-command.sh",
+    "build": "bash ./build.sh",
+    "start": "npm run build"
+  },
+  "files": [
+    "bin/install.sh",
+    "build.sh",
+    "template.html",
+    "scripts/setup.sh",
+    "scripts/copy-dashboard.sh",
+    "scripts/copy-command.sh",
+    "commands/ok-usage.md",
+    "README.md",
+    "LICENSE",
+    "example.jpg"
+  ]
+}
