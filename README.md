@@ -229,10 +229,15 @@ URL with a relative path.
 
 ## Changelog
 
+### v1.1.1
+
+- Slash command no longer registered as a skill — `/<prefix>-usage` is now a pure slash command, removing the model-trigger overhead on every invocation.
+- Removed the post-bash instruction prompt from the command file, so the model no longer generates a response after running the bash script.
+
 ### v1.1.0
 
 - **Light / dark theme toggle** — sun/moon button in the dashboard header; chart colors update on switch; preference persisted in `localStorage`.
-- Slash command prompt trimmed to reduce token usage on each `/ok-usage` invocation.
+- Slash command prompt trimmed to reduce token usage on each `/<prefix>-usage` invocation.
 
 ### v1.0.0
 
