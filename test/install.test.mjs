@@ -3,19 +3,19 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { buildCommandLine, compareVersions, installCommand, installDashboard, installedPrefixes } from "../lib/install.mjs";
+import { buildCommandLine, compareVersions, installDashboard, installSkill, installedPrefixes } from "../lib/install.mjs";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "ccud-"));
 const quiet = () => {};
 
 function fakePackage() {
   const root = tmp();
-  for (const d of ["lib", "commands"]) mkdirSync(join(root, d));
+  for (const d of ["lib", "skill"]) mkdirSync(join(root, d));
   writeFileSync(join(root, "build.mjs"), "// build");
   writeFileSync(join(root, "template.html"), "<html/>");
   writeFileSync(join(root, "lib", "x.mjs"), "export {}");
   writeFileSync(join(root, "lib", "install.mjs"), "export {}");
-  writeFileSync(join(root, "commands", "ok-usage.md"), "---\n---\n\n!__BUILD_CMD__\n");
+  writeFileSync(join(root, "skill", "SKILL.md"), "---\nname: __SKILL_NAME__\ndisable-model-invocation: true\n---\n\n!`__BUILD_CMD__`\n");
   return root;
 }
 
@@ -59,39 +59,70 @@ test("a fresh install does not create a build.sh shim", () => {
   assert.ok(!existsSync(join(dst, "build.sh")));
 });
 
-test("installCommand refuses to overwrite a command it did not install", () => {
-  const src = fakePackage();
-  const commandsDir = tmp();
-  writeFileSync(join(commandsDir, "my-usage.md"), "someone else's command");
-  const args = { srcRoot: src, commandsDir, dashboardDir: "/d", prefix: "my", pkgVersion: "1.2.0", log: quiet };
-  assert.throws(() => installCommand(args), /not installed by this package/);
-  assert.equal(readFileSync(join(commandsDir, "my-usage.md"), "utf8"), "someone else's command");
-  installCommand({ ...args, force: true });
-  assert.match(readFileSync(join(commandsDir, "my-usage.md"), "utf8"), /node "\/d\/build\.mjs"/);
+const skillArgs = (over = {}) => ({
+  srcRoot: fakePackage(), skillsDir: tmp(), commandsDir: tmp(), dashboardDir: "/d", useTilde: false, prefix: "my", pkgVersion: "1.3.0", log: quiet, ...over,
 });
 
-test("installCommand: install → recognised as ours → skip/upgrade", () => {
-  const src = fakePackage();
-  const commandsDir = tmp();
-  const args = { srcRoot: src, commandsDir, dashboardDir: "/d", useTilde: true, prefix: "ok", pkgVersion: "1.2.0" };
-  installCommand({ ...args, log: quiet });
-  assert.match(readFileSync(join(commandsDir, "ok-usage.md"), "utf8"), /^!node ~\/\.claude\/dashboard\/build\.mjs$/m);
-  assert.deepEqual(installedPrefixes(commandsDir), ["ok"]);
+test("installSkill refuses to overwrite a skill it did not install (e.g. a hand-written one)", () => {
+  const args = skillArgs();
+  const file = join(args.skillsDir, "my-usage", "SKILL.md");
+  mkdirSync(join(args.skillsDir, "my-usage"));
+  writeFileSync(file, "someone else's skill");
+  assert.throws(() => installSkill(args), /not installed by this package/);
+  assert.equal(readFileSync(file, "utf8"), "someone else's skill");
+  installSkill({ ...args, force: true });
+  assert.match(readFileSync(file, "utf8"), /!`node "\/d\/build\.mjs"`/);
+});
 
+test("installSkill writes a manual-only skill with the documented !`cmd` injection form", () => {
+  const args = skillArgs({ prefix: "ok", useTilde: true });
+  installSkill(args);
+  const body = readFileSync(join(args.skillsDir, "ok-usage", "SKILL.md"), "utf8");
+  assert.match(body, /^name: ok-usage$/m);
+  assert.match(body, /^disable-model-invocation: true$/m);
+  assert.match(body, /^!`node ~\/\.claude\/dashboard\/build\.mjs`$/m);
+  assert.ok(!/__[A-Z_]+__/.test(body), "no unreplaced placeholders");
+  assert.deepEqual(installedPrefixes({ skillsDir: args.skillsDir }), ["ok"]);
+});
+
+test("installSkill: skip when current, upgrade when newer", () => {
+  const args = skillArgs();
+  installSkill({ ...args, pkgVersion: "1.3.0" });
   const msgs = [];
-  installCommand({ ...args, log: m => msgs.push(m) });
+  installSkill({ ...args, pkgVersion: "1.3.0", log: m => msgs.push(m) });
   assert.match(msgs[0], /skipping/);
-  installCommand({ ...args, pkgVersion: "1.3.0", log: m => msgs.push(m) });
+  installSkill({ ...args, pkgVersion: "1.4.0", log: m => msgs.push(m) });
   assert.match(msgs.at(-1), /upgraded/);
 });
 
-test("installedPrefixes ignores usage files without our version marker", () => {
-  const dir = tmp();
-  writeFileSync(join(dir, "foo-usage.md"), "x");
-  writeFileSync(join(dir, "bar-usage.md"), "x");
-  writeFileSync(join(dir, ".bar-usage.version"), "1.0.0\n");
-  assert.deepEqual(installedPrefixes(dir), ["bar"]);
-  assert.deepEqual(installedPrefixes(join(dir, "missing")), []);
+test("installSkill retires a legacy command that this package installed, but only reports a foreign one", () => {
+  const ours = skillArgs();
+  writeFileSync(join(ours.commandsDir, "my-usage.md"), "!bash old");
+  writeFileSync(join(ours.commandsDir, ".my-usage.version"), "1.2.0\n");
+  const msgs = [];
+  installSkill({ ...ours, log: m => msgs.push(m) });
+  assert.ok(!existsSync(join(ours.commandsDir, "my-usage.md")) && !existsSync(join(ours.commandsDir, ".my-usage.version")));
+  assert.ok(msgs.some(m => /Removed the legacy slash command/.test(m)));
+
+  const foreign = skillArgs();
+  writeFileSync(join(foreign.commandsDir, "my-usage.md"), "mine");
+  const fmsgs = [];
+  installSkill({ ...foreign, log: m => fmsgs.push(m) });
+  assert.equal(readFileSync(join(foreign.commandsDir, "my-usage.md"), "utf8"), "mine", "foreign command is left alone");
+  assert.ok(fmsgs.some(m => /name collision/.test(m)));
+});
+
+test("installedPrefixes sees skills and legacy commands we installed, and ignores unmarked ones", () => {
+  const skillsDir = tmp();
+  const commandsDir = tmp();
+  mkdirSync(join(skillsDir, "aa-usage"));
+  writeFileSync(join(skillsDir, "aa-usage", ".version"), "1.3.0\n");
+  mkdirSync(join(skillsDir, "bb-usage")); // user's own skill, no marker
+  writeFileSync(join(commandsDir, "cc-usage.md"), "x");
+  writeFileSync(join(commandsDir, ".cc-usage.version"), "1.2.0\n");
+  writeFileSync(join(commandsDir, "dd-usage.md"), "x"); // foreign command
+  assert.deepEqual(installedPrefixes({ skillsDir, commandsDir }), ["aa", "cc"]);
+  assert.deepEqual(installedPrefixes({ skillsDir: join(skillsDir, "nope"), commandsDir: join(commandsDir, "nope") }), []);
 });
 
 test("buildCommandLine: tilde only for the default POSIX location", () => {

@@ -13,7 +13,7 @@ No server, no telemetry, no external API calls — Chart.js is bundled into the 
 
 ## Features
 
-- **`/<prefix>-usage` slash command** — type it in any Claude Code session to get an inline cost & token summary in the chat and open the full visual dashboard in one step.
+- **`/<prefix>-usage` skill** (manual-only, never invoked by the model) — type it in any Claude Code session to get an inline cost & token summary in the chat and open the full visual dashboard in one step.
 - **KPIs**: total cost, total tokens, cache reads, number of periods.
 - **Period tabs**: `Today` · `Daily` · `Weekly` · `Monthly`.
 - **Year dropdown** (right of the tabs) — populated from all years available in your data.
@@ -30,7 +30,7 @@ No server, no telemetry, no external API calls — Chart.js is bundled into the 
 
 - Any machine where [`ccusage`](https://github.com/ryoppippi/ccusage) runs, plus a modern browser. Everything here is plain Node.js — no `bash` or `python3` needed. Developed and tested on macOS; Linux and Windows use the same code but are untested.
 - Node.js ≥ 18 with `npm`/`npx` (`npx` resolves `ccusage` on first run; a globally installed `ccusage` is used first). Works with ccusage 12.4.0 – 20.x.
-- Claude Code CLI installed (so that `~/.claude/` exists and the slash command is picked up).
+- Claude Code CLI installed (so that `~/.claude/` exists and the skill is picked up).
 
 ## Installation
 
@@ -77,14 +77,14 @@ npm run setup
 ```
 
 Either path triggers the same flow. `setup` first prompts for a
-**command prefix** (default `my`, so the slash command becomes `/my-usage`;
+**prefix** (default `my`, so the skill is invoked as `/my-usage`;
 pick anything matching `[A-Za-z0-9_-]+`, e.g. `ok` → `/ok-usage`). To skip the
 prompt, pass it via env: `CC_USAGE_PREFIX=ok npm run setup`.
 
 Then it runs the full cascade:
 
 1. **`copy-dashboard`** — copies `build.mjs`, `lib/`, `vendor/` and `template.html` into `~/.claude/dashboard/` (or `$CLAUDE_CONFIG_DIR/dashboard/`).
-2. **`copy-command`** — copies the slash command into `~/.claude/commands/<prefix>-usage.md`.
+2. **`copy-skill`** — writes the skill to `~/.claude/skills/<prefix>-usage/SKILL.md` (a `disable-model-invocation` skill: only you can run it).
 
 After it finishes, open any Claude Code session and type:
 
@@ -99,16 +99,17 @@ will open in your default browser.
 
 ```bash
 npm run copy-dashboard          # dashboard files → ~/.claude/dashboard/
-CC_USAGE_PREFIX=my npm run copy-command  # slash command → ~/.claude/commands/my-usage.md
+CC_USAGE_PREFIX=my npm run copy-skill    # skill → ~/.claude/skills/my-usage/SKILL.md
 ```
 
-`copy-command` reads the prefix from `--prefix` or the `CC_USAGE_PREFIX` env var; without
-either it prompts interactively (defaulting to a command previously installed by this package,
+`copy-skill` reads the prefix from `--prefix` or the `CC_USAGE_PREFIX` env var; without
+either it prompts interactively (defaulting to a skill (or a pre-1.3 command) previously installed by this package,
 or `my` on a fresh machine; non-interactive runs use that default). The variable is named
 `CC_USAGE_PREFIX` deliberately — `PREFIX` collides with npm's own `--prefix` config.
 
-It never overwrites a `<prefix>-usage.md` that this package did not install — pick another
-prefix, or pass `--force`. Pass `--force` to either step to reinstall the same version.
+It never overwrites a `<prefix>-usage` skill that this package did not install — pick another
+prefix, or pass `--force`. A slash command that **this package** installed before 1.3
+(`~/.claude/commands/<prefix>-usage.md`) is removed and replaced by the skill. Pass `--force` to either step to reinstall the same version.
 
 ### Optional — shell alias
 
@@ -165,9 +166,9 @@ It will:
    `Simple Browser: Show`) — for viewing the dashboard in a side tab inside
    VS Code instead of a separate browser window.
 
-> The slash command name comes from the prefix you chose at setup time — it's
-> stored as `~/.claude/commands/<prefix>-usage.md`. Re-run `npm run setup` with
-> a different `CC_USAGE_PREFIX` to add another (the previous file is left in place).
+> The name comes from the prefix you chose at setup time — the skill lives in
+> `~/.claude/skills/<prefix>-usage/`. Re-run `npm run setup` with a different
+> `CC_USAGE_PREFIX` to add another (the previous one is left in place).
 
 > **Why not auto-open in Simple Browser?** The `code` CLI does not expose a way to
 > invoke arbitrary VS Code commands like `simpleBrowser.show` from a script. The
@@ -180,7 +181,7 @@ It will:
 | ------------------------ | ------------------------------------------------------------------------------------- |
 | `npm run setup`          | Prompts for command prefix (default `my`), then runs the full setup cascade           |
 | `npm run copy-dashboard` | Copies the dashboard files into `~/.claude/dashboard/` (version-aware)                |
-| `npm run copy-command`   | Writes `~/.claude/commands/<prefix>-usage.md` (uses `CC_USAGE_PREFIX` env or prompts) |
+| `npm run copy-skill`     | Writes `~/.claude/skills/<prefix>-usage/SKILL.md` (uses `CC_USAGE_PREFIX` env or prompts); `copy-command` is a kept alias |
 | `npm run build`          | Renders **this repo's** `template.html` to `./index.html` and opens it (dev loop)     |
 | `npm start`              | Same as `npm run build`                                                               |
 | `npm test`               | Runs the unit tests (`node --test`, no dependencies)                                  |
@@ -203,8 +204,8 @@ ccusage-ui-dashboard/
 ├── vendor/                   # Chart.js 4.4.6 (MIT), inlined into the generated HTML
 ├── bin/
 │   └── install.mjs           # npx entrypoint (`npx ccusage-ui-dashboard`) and `npm run setup`
-├── commands/
-│   └── ok-usage.md           # Claude Code slash command template
+├── skill/
+│   └── SKILL.md              # Claude Code skill template (manual-only)
 └── test/                     # node:test unit tests
 ```
 
@@ -216,8 +217,8 @@ After running `npm run setup` on a new machine, the installed layout is:
 ├── config.json               # optional, yours — never overwritten
 └── index.html                # generated on each build
 
-~/.claude/commands/
-└── <prefix>-usage.md         # makes /<prefix>-usage available in Claude Code
+~/.claude/skills/
+└── <prefix>-usage/SKILL.md   # makes /<prefix>-usage available in Claude Code (+ .version marker)
 ```
 
 ## Customisation
@@ -229,10 +230,10 @@ After running `npm run setup` on a new machine, the installed layout is:
   `totalTokens` in the `render()` function if you prefer a token-based stat.
 - **Inline summary contents** — edit `lib/summary.mjs` to add/remove rows or change
   formatting. The output goes straight into Claude Code's chat via `/<prefix>-usage`.
-- **Slash command behavior** — edit `commands/ok-usage.md` (in this repo) to
-  change what Claude says alongside the summary, then rerun
-  `CC_USAGE_PREFIX=<your-prefix> npm run copy-command` (or just
-  `npm run copy-command` to be re-prompted) to redeploy. To switch the prefix,
+- **Skill behavior** — edit `skill/SKILL.md` (in this repo) to
+  change what Claude does alongside the summary, then rerun
+  `CC_USAGE_PREFIX=<your-prefix> npm run copy-skill --force` (or just
+  `npm run copy-skill` to be re-prompted) to redeploy. To switch the prefix,
   run setup again with a different `CC_USAGE_PREFIX`.
 
 > **Heads up:** if you customise files inside `~/.claude/dashboard/` directly
@@ -246,6 +247,21 @@ All data stays local. The generated HTML makes no network requests (Chart.js is 
 The only network access is `npx` fetching `ccusage` itself when it is not installed yet.
 
 ## Changelog
+
+### v1.3.0
+
+`/<prefix>-usage` is now a **skill** instead of a custom slash command. How you call it does not change.
+
+**Changed**
+- Installed as `~/.claude/skills/<prefix>-usage/SKILL.md` with `disable-model-invocation: true` — Claude never invokes it on its own and, per the Claude Code docs, a skill with that flag is kept out of the model's context. Custom commands are the deprecated predecessor of skills.
+- The skill body uses the documented injection form `` !`cmd` `` instead of a bare `!cmd` line.
+- New `npm run copy-skill` / `--skill`; `copy-command` / `--command` stay as aliases.
+
+**Upgrading from 1.2.x**
+- Re-run setup. A command that this package installed (`~/.claude/commands/<prefix>-usage.md`) is removed and replaced by the skill. A skill or command with the same name that this package did not create is never overwritten without `--force`; a foreign command with that name is reported as a name collision (which one wins is not documented — remove one).
+
+**Known**
+- Claude still produces a short reply after the dashboard output is injected (documented behaviour for skills); `model:`/`effort:` pinning to make it cheaper is not used because it is not in the official skills reference.
 
 ### v1.2.0
 

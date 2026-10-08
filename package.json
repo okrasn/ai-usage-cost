@@ -1,6 +1,6 @@
 {
   "name": "ccusage-ui-dashboard",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": false,
   "description": "Local visual dashboard for Claude Code usage analytics (cost & tokens by day/week/month/model). Reads local Claude logs via ccusage package; renders a self-contained HTML dashboard with Chart.js — no server, no telemetry. Ships with a /<prefix>-usage slash command for Claude Code.",
   "license": "MIT",
@@ -35,7 +35,8 @@
   "scripts": {
     "setup": "node ./bin/install.mjs",
     "copy-dashboard": "node ./bin/install.mjs --dashboard",
-    "copy-command": "node ./bin/install.mjs --command",
+    "copy-skill": "node ./bin/install.mjs --skill",
+    "copy-command": "node ./bin/install.mjs --skill",
     "build": "node ./build.mjs",
     "start": "npm run build",
     "test": "node --test"
@@ -46,7 +47,7 @@
     "lib",
     "vendor",
     "template.html",
-    "commands/ok-usage.md",
+    "skill/SKILL.md",
     "README.md",
     "LICENSE",
     "example.jpg"
