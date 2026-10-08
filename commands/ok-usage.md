@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(bash:*)
+allowed-tools: Bash(node:*)
 ---
 
-!bash ~/.claude/dashboard/build.sh
+!__BUILD_CMD__
