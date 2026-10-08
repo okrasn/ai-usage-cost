@@ -39,7 +39,9 @@
     "copy-command": "node ./bin/install.mjs --skill",
     "build": "node ./build.mjs",
     "start": "npm run build",
-    "test": "node --test"
+    "test": "node --test",
+    "prices:update": "node ./scripts/update-prices.mjs",
+    "verify:ccusage": "node ./scripts/verify-ccusage.mjs"
   },
   "files": [
     "bin/install.mjs",

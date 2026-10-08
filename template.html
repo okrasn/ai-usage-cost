@@ -25,7 +25,7 @@
   .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
   h1 { margin: 0 0 4px; font-size: 22px; font-weight: 600; }
   .sub { color: var(--muted); margin-bottom: 24px; font-size: 12px; }
-  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .notice { margin-bottom: 16px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 6px; font-size: 13px; }
   .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
   .kpi .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
   .kpi .value { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -54,6 +54,7 @@
   th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   tbody tr:hover { background: var(--panel-2); }
+  tbody tr.total td { font-weight: 600; }
   .footer {
     margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--border);
     color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap;
@@ -71,7 +72,7 @@
   }
   .footer a { color: var(--text); text-decoration: none; border-bottom: 1px dashed var(--border); }
   .footer a:hover { border-bottom-color: var(--accent); }
-  @media (max-width: 800px) { .kpis { grid-template-columns: repeat(2, 1fr); } .grid { grid-template-columns: 1fr; } }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
 
   [data-theme="light"] {
     --bg: #f5f7fa;
@@ -115,14 +116,8 @@
       </svg>
     </button>
   </div>
+  <div class="notice" id="notice" hidden></div>
   <div class="sub" id="sub"></div>
-
-  <div class="kpis">
-    <div class="kpi"><div class="label">Total cost</div><div class="value" id="kpi-cost">—</div></div>
-    <div class="kpi"><div class="label">Total tokens</div><div class="value" id="kpi-tokens">—</div></div>
-    <div class="kpi"><div class="label">Cache read</div><div class="value" id="kpi-cache">—</div></div>
-    <div class="kpi"><div class="label">Periods</div><div class="value" id="kpi-periods">—</div></div>
-  </div>
 
   <div class="tabs-row">
     <div class="tabs">
@@ -135,9 +130,9 @@
   </div>
 
   <div class="kpis-stats">
-    <div class="kpi"><div class="label">Min cost / period</div><div class="value" id="kpi-min">—</div></div>
-    <div class="kpi"><div class="label">Avg cost / period</div><div class="value" id="kpi-avg">—</div></div>
-    <div class="kpi"><div class="label">Max cost / period</div><div class="value" id="kpi-max">—</div></div>
+    <div class="kpi"><div class="label" id="kpi-min-label">Min cost</div><div class="value" id="kpi-min">—</div></div>
+    <div class="kpi"><div class="label" id="kpi-avg-label">Avg cost</div><div class="value" id="kpi-avg">—</div></div>
+    <div class="kpi"><div class="label" id="kpi-max-label">Max cost</div><div class="value" id="kpi-max">—</div></div>
   </div>
 
   <div class="grid">
@@ -251,25 +246,47 @@ function aggregateByModel(rows) {
   return [...map.entries()].sort((a, b) => b[1] - a[1]);
 }
 
+// Min / Avg / Max cost cards. Daily, Weekly and Monthly use every row of the table below (current year); the Today
+// tab would only ever have one row, so it uses the last 30 calendar days of daily data (days that have usage).
+const STAT_UNIT = { today: "day", daily: "day", weekly: "week", monthly: "month" };
+function statRows(view, rows) {
+  if (view !== "today") return rows;
+  const end = todayStr();
+  const d = new Date();
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 29).toLocaleDateString("sv-SE");
+  return (DATA.daily || []).filter(r => r.date >= start && r.date <= end);
+}
+function renderStats(view, rows) {
+  const unit = STAT_UNIT[view];
+  const key = KEY_BY_VIEW[view];
+  const list = statRows(view, rows);
+  const set = (id, label, value) => {
+    document.getElementById("kpi-" + id + "-label").textContent = label;
+    document.getElementById("kpi-" + id).textContent = value;
+  };
+  if (!list.length) {
+    set("min", `Min cost / ${unit}`, "—");
+    set("avg", `Avg cost / ${unit}`, "—");
+    set("max", `Max cost / ${unit}`, "—");
+    return;
+  }
+  const cost = r => r.totalCost || 0;
+  const lo = list.reduce((a, r) => (cost(r) < cost(a) ? r : a)); // ties: the earliest row
+  const hi = list.reduce((a, r) => (cost(r) > cost(a) ? r : a));
+  const avg = list.reduce((s, r) => s + cost(r), 0) / list.length;
+  const scope = view === "today" ? `${list.length} of last 30 days` : `${list.length} ${unit}${list.length === 1 ? "" : "s"}`;
+  set("min", `Min cost / ${unit} · ${lo[key]}`, fmtUsd(cost(lo)));
+  set("avg", `Avg cost / ${unit} · ${scope}`, fmtUsd(avg));
+  set("max", `Max cost / ${unit} · ${hi[key]}`, fmtUsd(cost(hi)));
+}
+
 function render(view) {
   const rows = rowsForView(view);
   const keyField = KEY_BY_VIEW[view];
 
-  const totalCost   = rows.reduce((s, r) => s + (r.totalCost || 0), 0);
-  const totalTokens = rows.reduce((s, r) => s + (r.totalTokens || 0), 0);
-  const cacheRead   = rows.reduce((s, r) => s + (r.cacheReadTokens || 0), 0);
-  document.getElementById("kpi-cost").textContent    = fmtUsd(totalCost);
-  document.getElementById("kpi-tokens").textContent  = fmtNum(totalTokens);
-  document.getElementById("kpi-cache").textContent   = fmtNum(cacheRead);
-  document.getElementById("kpi-periods").textContent = rows.length;
+  const totalCost = rows.reduce((s, r) => s + (r.totalCost || 0), 0);
 
-  const costs = rows.map(r => r.totalCost || 0);
-  const minC = costs.length ? Math.min(...costs) : 0;
-  const maxC = costs.length ? Math.max(...costs) : 0;
-  const avgC = costs.length ? totalCost / costs.length : 0;
-  document.getElementById("kpi-min").textContent = fmtUsd(minC);
-  document.getElementById("kpi-avg").textContent = fmtUsd(avgC);
-  document.getElementById("kpi-max").textContent = fmtUsd(maxC);
+  renderStats(view, rows);
 
   const allModels = [...new Set(rows.flatMap(r => (r.modelBreakdowns || []).map(b => b.modelName)))];
   const labels = rows.map(r => r[keyField]);
@@ -328,6 +345,24 @@ function render(view) {
 
   const tbody = document.querySelector("#tbl tbody");
   tbody.innerHTML = "";
+  if (rows.length) {
+    // column sums for the current view and year; models ordered by what they cost
+    const sum = k => rows.reduce((s, r) => s + (r[k] || 0), 0);
+    const byCost = aggregateByModel(rows).map(([m]) => m);
+    const models = [...byCost, ...rows.flatMap(r => r.modelsUsed || []).filter(m => !byCost.includes(m))];
+    const tr = document.createElement("tr");
+    tr.className = "total";
+    tr.innerHTML = `
+      <td>Total</td>
+      <td class="num">${fmtUsd(totalCost)}</td>
+      <td class="num">${fmtNum(sum("inputTokens"))}</td>
+      <td class="num">${fmtNum(sum("outputTokens"))}</td>
+      <td class="num">${fmtNum(sum("cacheCreationTokens"))}</td>
+      <td class="num">${fmtNum(sum("cacheReadTokens"))}</td>
+      <td>${[...new Set(models)].map(m => esc(shortModel(m))).join(", ")}</td>
+    `;
+    tbody.appendChild(tr);
+  }
   [...rows].reverse().forEach(r => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
@@ -369,7 +404,24 @@ document.querySelectorAll(".tab").forEach(btn => {
 // initial state: Today is active by default, so disable the year selector
 yearSelect.disabled = true;
 
-document.getElementById("sub").textContent = "Generated at " + DATA.generatedAt + " · data from local Claude logs (~/.claude/projects)";
+function historyLabel() {
+  const h = DATA.history;
+  return h && h.first ? " · history since " + h.first : "";
+}
+function priceLabel() {
+  const p = DATA.prices;
+  if (!p || !p.asOf) return "";
+  const notes = [p.origin === "bundled" ? "bundled with the package" : "", p.refreshFailed ? "refresh failed" : ""].filter(Boolean);
+  const how = notes.length ? " (" + notes.join(", ") + ")" : "";
+  const old = p.ageDays >= 7 ? " — outdated, go online to refresh" : "";
+  return " · prices as of " + p.asOf + how + old;
+}
+document.getElementById("sub").textContent = "Generated at " + DATA.generatedAt + " · data from local Claude Code logs" + (DATA.source ? " · read via " + DATA.source : "") + historyLabel() + priceLabel();
+if (DATA.unpriced && DATA.unpriced.length) {
+  const n = document.getElementById("notice");
+  n.textContent = "No price known for: " + DATA.unpriced.join(", ") + ". Their cost is counted as $0 — add rates under \"prices\" in config.json or update the package.";
+  n.hidden = false;
+}
 document.getElementById("footer-year").textContent = new Date().getFullYear();
 document.getElementById("footer-version").textContent = DATA.version ? "v" + DATA.version : "";
 

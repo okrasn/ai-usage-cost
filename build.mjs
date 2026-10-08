@@ -5,8 +5,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildPeriods } from "./lib/aggregate.mjs";
 import { fetchDaily } from "./lib/ccusage.mjs";
 import { loadConfig } from "./lib/config.mjs";
-import { normalizeDaily } from "./lib/normalize.mjs";
+import { readLogs } from "./lib/logs.mjs";
+import { resolvePrices } from "./lib/price-refresh.mjs";
 import { renderHtml } from "./lib/render.mjs";
+import { SOURCES, loadDaily } from "./lib/source.mjs";
 import { buildSummary } from "./lib/summary.mjs";
 import { getUserName, openInBrowser, readVersion } from "./lib/system.mjs";
 
@@ -14,7 +16,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 const HELP = `Usage: build.mjs [options]
 
-Reads Claude Code usage via ccusage and regenerates the dashboard.
+Reads Claude Code usage and regenerates the dashboard.
 
 Options:
   --no-open           do not open the dashboard in a browser
@@ -22,6 +24,11 @@ Options:
   --out <file>        output HTML file     (default: index.html next to this script)
   --template <file>   template to render   (default: template.html next to this script)
   --config <file>     config JSON          (default: config.json next to this script)
+  --refresh-prices    download the price table now (otherwise: once per day, cached next to this script)
+  --reset-history     rebuild history.json from the logs that exist now (the old file is kept as history.json.bak)
+  --offline           never download prices; use the cache / the table bundled with the package
+  --source <name>     auto | logs | ccusage (default: from config, else auto): "logs" reads the Claude Code
+                      transcripts itself, "ccusage" shells out to ccusage, "auto" prefers logs
   -h, --help          show this help
 `;
 
@@ -38,9 +45,17 @@ function parseArgs(argv) {
     else if (a === "--out") opts.out = resolve(valueOf(i++, a));
     else if (a === "--template") opts.template = resolve(valueOf(i++, a));
     else if (a === "--config") opts.config = resolve(valueOf(i++, a));
+    else if (a === "--source") {
+      opts.source = valueOf(i++, a);
+      if (!SOURCES.includes(opts.source)) throw new Error(`--source must be one of ${SOURCES.join(", ")}`);
+    }
+    else if (a === "--refresh-prices") opts.refreshPrices = true;
+    else if (a === "--offline") opts.offline = true;
+    else if (a === "--reset-history") opts.resetHistory = true;
     else if (a === "-h" || a === "--help") opts.help = true;
     else throw new Error(`unknown option: ${a} (see --help)`);
   }
+  if (opts.refreshPrices && opts.offline) throw new Error("--refresh-prices and --offline contradict each other");
   return opts;
 }
 
@@ -58,9 +73,14 @@ function writeAtomic(file, content) {
   renameSync(tmp, file);
 }
 
-export function main(argv, deps = {}) {
+export async function main(argv, deps = {}) {
   const {
     fetch = fetchDaily,
+    readLogs: readLogsDep = readLogs,
+    pricesPath = join(HERE, "vendor", "prices.json"),
+    pricesCachePath = join(HERE, "prices-cache.json"),
+    historyPath = join(HERE, "history.json"),
+    fetchImpl,
     userName = getUserName,
     open = openInBrowser,
     now = new Date(),
@@ -78,7 +98,27 @@ export function main(argv, deps = {}) {
   const template = readFileSync(opts.template ?? join(HERE, "template.html"), "utf8");
   const chartJs = template.includes("__CHARTJS__") ? readChartJs() : "";
 
-  const daily = normalizeDaily(fetch());
+  const getPrices = (extra = {}) =>
+    resolvePrices({
+      bundledPath: pricesPath,
+      cachePath: pricesCachePath,
+      overrides: config.prices,
+      mode: opts.offline ? "off" : config.priceRefresh,
+      force: Boolean(opts.refreshPrices),
+      now,
+      url: config.priceUrl ?? undefined,
+      fetchImpl,
+      log,
+      ...extra,
+    });
+  const { daily, unpriced, source, prices, history } = await loadDaily({
+    source: opts.source ?? config.source,
+    readLogs: readLogsDep,
+    fetchCcusage: fetch,
+    getPrices,
+    history: { enabled: config.history === "on", path: historyPath, reset: Boolean(opts.resetHistory), now },
+    log,
+  });
   const periods = buildPeriods(daily, { weekStart: config.weekStart });
   const payload = {
     daily: periods.daily,
@@ -86,10 +126,14 @@ export function main(argv, deps = {}) {
     monthly: periods.monthly,
     generatedAt: now.toISOString(),
     version: readVersion(HERE),
+    source,
+    unpriced,
+    prices,
+    history,
   };
   writeAtomic(out, renderHtml(template, payload, userName(), chartJs));
 
-  if (opts.summary) log(buildSummary(daily, now));
+  if (opts.summary) log(buildSummary(daily, now, { unpriced, prices }));
   log(`Dashboard regenerated: ${out}`);
   if (process.env.TERM_PROGRAM === "vscode") {
     log("\nInside VS Code? Open in Simple Browser instead of a separate window:");
@@ -104,7 +148,7 @@ export function main(argv, deps = {}) {
 const isDirectRun = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) {
   try {
-    process.exitCode = main(process.argv.slice(2));
+    process.exitCode = await main(process.argv.slice(2));
   } catch (e) {
     console.error(`ccusage-ui-dashboard: ${e.message}`);
     process.exitCode = 1;

@@ -1,2 +1,4 @@
 index.html
 config.json
+prices-cache.json
+history.json*
