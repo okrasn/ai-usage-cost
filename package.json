@@ -1,36 +1,49 @@
 {
-  "name": "ccusage-ui-dashboard",
+  "name": "ai-usage-cost",
   "version": "1.3.0",
   "private": false,
-  "description": "Local visual dashboard for Claude Code usage analytics (cost & tokens by day/week/month/model). Reads local Claude logs via ccusage package; renders a self-contained HTML dashboard with Chart.js — no server, no telemetry. Ships with a /<prefix>-usage slash command for Claude Code.",
+  "description": "Claude Code usage & cost dashboard: one offline HTML file, spend by day, project and session, $/hour, history beyond 30 days",
   "license": "MIT",
   "author": "Oleksandr Krasnokutskyi <okrasn.dev@gmail.com>",
   "keywords": [
-    "claude",
     "claude-code",
-    "ccusage",
+    "claude",
+    "anthropic",
+    "usage",
+    "cost",
+    "token-usage",
     "dashboard",
-    "analytics",
     "cost-tracking",
-    "slash-command"
+    "usage-tracking",
+    "html-report",
+    "analytics",
+    "ccusage",
+    "llm-cost",
+    "ai-cost",
+    "tokens",
+    "claude-code-skill",
+    "privacy",
+    "local-first",
+    "cli",
+    "zero-dependency"
   ],
   "engines": {
     "node": ">=18"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/okrasn/ccusage-ui-dashboard.git"
+    "url": "git+https://github.com/okrasn/ai-usage-cost.git"
   },
   "bugs": {
-    "url": "https://github.com/okrasn/ccusage-ui-dashboard/issues"
+    "url": "https://github.com/okrasn/ai-usage-cost/issues"
   },
-  "homepage": "https://github.com/okrasn/ccusage-ui-dashboard#readme",
+  "homepage": "https://github.com/okrasn/ai-usage-cost#readme",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
   },
   "bin": {
-    "ccusage-ui-dashboard": "bin/install.mjs"
+    "ai-usage-cost": "bin/install.mjs"
   },
   "scripts": {
     "setup": "node ./bin/install.mjs",
@@ -51,7 +64,7 @@
     "template.html",
     "skill/SKILL.md",
     "README.md",
-    "LICENSE",
-    "example.jpg"
+    "CHANGELOG.md",
+    "LICENSE"
   ]
 }

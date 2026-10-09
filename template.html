@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>__USER_NAME__ Claude Usage Dashboard</title>
+<title>AI Usage Dashboard</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <script>__CHARTJS__</script>
 <style>
@@ -26,12 +26,17 @@
   h1 { margin: 0 0 4px; font-size: 22px; font-weight: 600; }
   .sub { color: var(--muted); margin-bottom: 24px; font-size: 12px; }
   .notice { margin-bottom: 16px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 6px; font-size: 13px; }
-  .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .kpi { padding: 14px 10px; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
   .kpi .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
   .kpi .value { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .kpis-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+  /* one block of label / value cells: three columns, a row per kind of figure, rows divided by a thin line */
+  /* the same insets as the table card below (card padding 16px, cell padding 10px): the dividers stop short of the edges and the labels line up with the table text */
+  .kpi-block { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px; padding: 0 16px; overflow: hidden; }
+  .kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .kpi-row + .kpi-row { border-top: 1px solid var(--border); }
   .tabs-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
-  .tabs { display: flex; gap: 4px; }
+  .tabs { display: flex; gap: 4px; align-items: center; }
+  .tab-sep { width: 1px; height: 22px; background: var(--border); margin: 0 8px; flex: none; } /* time views | views by what the money went to */
   .tab {
     background: var(--panel); color: var(--muted); border: 1px solid var(--border);
     padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px;
@@ -58,11 +63,13 @@
   /* an author `display` (e.g. .range { display: flex }) would otherwise beat the browser's [hidden] { display: none } */
   [hidden] { display: none !important; }
   .range { display: flex; gap: 4px; }
+  .range-wrap { display: flex; align-items: center; gap: 16px; }
   .chip {
     background: var(--panel); color: var(--muted); border: 1px solid var(--border);
     padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 12px;
   }
   .chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .cell-note { display: block; color: var(--muted); font-size: 11px; font-weight: 400; margin-top: 2px; }
   tbody tr.has-kids { cursor: pointer; }
   .twisty { display: inline-block; width: 14px; margin-right: 4px; color: var(--muted); }
   td.empty { color: var(--muted); text-align: center; padding: 18px 10px; }
@@ -112,19 +119,70 @@
   .theme-toggle:hover { color: var(--text); border-color: var(--accent); }
   .theme-toggle.on { color: var(--accent); border-color: var(--accent); }
   .header-actions { display: flex; gap: 8px; }
+  /* ---- printing (the active tab: heading, figures, charts, table) --------------------------------------------------
+     Adapted from the shared print skeleton of the maths-pack UI: a white page whatever the theme, controls hidden, @page
+     margins with a page counter, the table header repeated on every page and rows kept whole, charts fitted to the width.
+     The canvas charts are redrawn in the light palette by the beforeprint handler in the script (CSS cannot recolour them). */
+  .print-context { display: none; }
+  @media print {
+    @page {
+      size: A4 landscape; /* the tables are wide (up to ten columns); portrait squeezes Models and breaks dates */
+      margin: 1.5cm 1.4cm 1.7cm;
+      @bottom-right { content: counter(page) " / " counter(pages); font: 8pt ui-sans-serif, system-ui, sans-serif; color: #666; }
+    }
+    :root { --bg: #fff; --panel: #fff; --panel-2: #fff; --text: #000; --muted: #444; --border: #bbb; }
+    body { background: #fff !important; color: #000 !important; font-size: 10pt; }
+    .wrap { max-width: none; padding: 0; }
+    .tabs-row, .header-actions, .tab-sep, .footer .links { display: none !important; }
+    button, select { display: none !important; }
+    h1 { font-size: 17pt; }
+    .sub { margin-bottom: 4px; font-size: 8pt; color: #444; }
+    .print-context { display: block; margin: 0 0 10px; font-size: 11pt; font-weight: 600; }
+    .notice { font-size: 9pt; }
+    * { box-shadow: none !important; text-shadow: none !important; transition: none !important; }
+    a { color: #000 !important; border-bottom: none !important; text-decoration: none !important; }
+    a::after { content: none !important; }
+    /* the figures block and the charts stay in one piece; the grid keeps its two columns although the page is narrow */
+    .kpi-block, .grid, .grid .card { break-inside: avoid; page-break-inside: avoid; }
+    .kpi { padding: 6px 8px; }
+    .kpi .value { font-size: 12pt; }
+    .kpi .label { font-size: 7pt; }
+    .grid { grid-template-columns: 2fr 1fr !important; gap: 10px; margin-bottom: 10px; }
+    .card { padding: 8px 10px; }
+    .card h3 { margin-bottom: 6px; font-size: 8pt; }
+    canvas { max-width: 100% !important; max-height: 250px; break-inside: avoid; }
+    /* the table may run over several pages: header on each, no row cut in two, no scroll box */
+    .table-card { break-inside: auto; page-break-inside: auto; }
+    table { font-size: 8pt; }
+    th, td { padding: 2px 4px; }
+    th { font-size: 7pt; }
+    thead { display: table-header-group; }
+    thead, thead th { position: static !important; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    tbody tr:hover { background: none; }
+    tbody tr.total td { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #eee; }
+    .cell-note { font-size: 7pt; }
+    .footer { margin-top: 8px; padding-top: 4px; font-size: 7pt; color: #555; }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="header-row">
-    <h1>__USER_NAME__ Claude Usage Dashboard</h1>
+    <h1 id="page-title">AI Usage Dashboard</h1>
     <div class="header-actions">
+    <select id="agent-select" class="year-select" title="Which AI tool to show" aria-label="AI tool" hidden></select>
     <button id="privacy-toggle" class="theme-toggle" aria-pressed="false" title="Hide project names" aria-label="Hide project names">
       <svg id="icon-eye" xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
       </svg>
       <svg id="icon-eye-off" xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
         <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>
+      </svg>
+    </button>
+    <button id="print-btn" class="theme-toggle" title="Print this tab" aria-label="Print this tab">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>
       </svg>
     </button>
     <button id="theme-toggle" class="theme-toggle" title="Toggle theme" aria-label="Toggle theme">
@@ -142,6 +200,7 @@
   </div>
   <div class="notice" id="notice" hidden></div>
   <div class="sub" id="sub"></div>
+  <div class="print-context" id="print-context" aria-hidden="true"></div>
 
   <div class="tabs-row">
     <div class="tabs">
@@ -149,23 +208,39 @@
       <button class="tab" data-view="daily">Daily</button>
       <button class="tab" data-view="weekly">Weekly</button>
       <button class="tab" data-view="monthly">Monthly</button>
+      <span class="tab-sep" id="tab-sep" aria-hidden="true"></span>
       <button class="tab" id="tab-projects" data-view="projects">Projects</button>
+      <button class="tab" id="tab-sessions" data-view="sessions">Sessions</button>
     </div>
     <select id="year-select" class="year-select" title="Filter by year"></select>
-    <div class="range" id="range-group" hidden>
-      <button class="chip" data-range="1d">1d</button>
-      <button class="chip" data-range="7d">7d</button>
-      <button class="chip" data-range="30d">30d</button>
-      <button class="chip" data-range="90d">90d</button>
-      <button class="chip" data-range="1y">1y</button>
-      <button class="chip active" data-range="all">All</button>
+    <div class="range-wrap">
+      <div class="range" id="range-group" hidden>
+        <button class="chip" data-range="1d">1d</button>
+        <button class="chip" data-range="7d">7d</button>
+        <button class="chip" data-range="30d">30d</button>
+        <button class="chip" data-range="90d">90d</button>
+        <button class="chip" data-range="1y">1y</button>
+        <button class="chip active" data-range="all">All</button>
+      </div>
     </div>
   </div>
 
-  <div class="kpis-stats">
+  <div class="kpi-block">
+  <div class="kpi-row" id="cost-strip">
     <div class="kpi"><div class="label" id="kpi-min-label">Min cost</div><div class="value" id="kpi-min">—</div></div>
     <div class="kpi"><div class="label" id="kpi-avg-label">Avg cost</div><div class="value" id="kpi-avg">—</div></div>
     <div class="kpi"><div class="label" id="kpi-max-label">Max cost</div><div class="value" id="kpi-max">—</div></div>
+  </div>
+  <div class="kpi-row" id="cache-strip">
+    <div class="kpi" title="Share of the input-side tokens (input + cache writes + cache reads) that were served from the prompt cache"><div class="label">Cache hit rate</div><div class="value" id="cache-rate">—</div></div>
+    <div class="kpi" title="Tokens read from the prompt cache"><div class="label">Served from cache</div><div class="value" id="cache-served">—</div></div>
+    <div class="kpi" title="Estimate at today's prices: what the same tokens would have cost as plain input, minus what they cost through the cache (writes cost a little more than input, reads far less)"><div class="label">Saved by cache ≈</div><div class="value" id="cache-saved">—</div></div>
+  </div>
+  <div class="kpi-row" id="session-strip" hidden>
+    <div class="kpi" title="Sessions last active in the chosen period"><div class="label">Sessions</div><div class="value" id="sess-count">—</div></div>
+    <div class="kpi" title="Share of the cost that subagents (Task / Agent tool) caused"><div class="label">Subagents · share of cost</div><div class="value" id="sess-side">—</div></div>
+    <div class="kpi" title="Share of the output tokens that were thinking"><div class="label">Thinking · share of output</div><div class="value" id="sess-think">—</div></div>
+  </div>
   </div>
 
   <div class="grid">
@@ -179,7 +254,7 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card table-card">
     <table id="tbl">
       <thead>
         <tr>
@@ -200,14 +275,21 @@
   </div>
 
   <footer class="footer">
-    <span><a href="https://github.com/okrasn/ccusage-ui-dashboard" target="_blank" rel="noopener">GitHub</a> &middot; <a href="https://www.npmjs.com/package/ccusage-ui-dashboard" target="_blank" rel="noopener">npm</a></span>
-    <span>&copy; <span id="footer-year"></span> Claude Usage Dashboard <span id="footer-version"></span></span>
-    <span>Built with <a href="https://claude.com" target="_blank" rel="noopener">Claude</a> &middot; Data: local Claude Code logs</span>
+    <span class="links"><a href="https://github.com/okrasn/ai-usage-cost" target="_blank" rel="noopener">GitHub</a> &middot; <a href="https://www.npmjs.com/package/ai-usage-cost" target="_blank" rel="noopener">npm</a></span>
+    <span>&copy; <span id="footer-year"></span> AI Usage Dashboard <span id="footer-version"></span></span>
+    <span>Built with <a href="https://claude.com" target="_blank" rel="noopener">Claude</a> &middot; Data: local logs of your AI tools</span>
   </footer>
 </div>
 
 <script>
 const DATA = __DATA__;
+// The AI tools in this page. DATA.agents lists them ([{ id, label, capabilities }]); the first one's data is DATA itself, every
+// further agent's is DATA.more[id]. VIEW is the data of the agent on screen: daily, weekly, monthly, projects, time, sessions.
+const AGENTS = DATA.agents && DATA.agents.length ? DATA.agents : [{ id: "claude", label: "Claude Code", capabilities: {} }];
+let agent = AGENTS[0];
+let VIEW = DATA;
+// a capability is only denied when the payload says `false` (a payload from before agents existed says nothing)
+const can = name => agent.capabilities[name] !== false;
 
 const COLORS = ["#d97757", "#5b9dd9", "#7ec27e", "#c084fc", "#f5b342", "#e87a90", "#4dd0e1", "#a3a3a3"];
 const fmtUsd = n => "$" + (n || 0).toFixed(2);
@@ -252,7 +334,7 @@ let barChart, doughnutChart;
 const MODEL_COLOR = (() => {
   const totals = new Map();
   for (const view of ["daily", "weekly", "monthly"]) {
-    for (const r of (DATA[view] || [])) {
+    for (const r of (VIEW[view] || [])) {
       for (const b of (r.modelBreakdowns || [])) {
         totals.set(b.modelName, (totals.get(b.modelName) || 0) + (b.cost || 0));
       }
@@ -268,10 +350,10 @@ const colorFor = m => MODEL_COLOR.get(m) || "#a3a3a3";
 function rowsForView(view) {
   if (view === "today") {
     const t = todayStr();
-    return (DATA.daily || []).filter(r => r.date === t);
+    return (VIEW.daily || []).filter(r => r.date === t);
   }
   const key = KEY_BY_VIEW[view];
-  const rows = DATA[view] || [];
+  const rows = VIEW[view] || [];
   return rows.filter(r => (r[key] || "").startsWith(selectedYear + "-"));
 }
 
@@ -279,7 +361,7 @@ function collectYears() {
   const ys = new Set();
   for (const view of ["daily", "weekly", "monthly"]) {
     const key = KEY_BY_VIEW[view];
-    for (const r of (DATA[view] || [])) {
+    for (const r of (VIEW[view] || [])) {
       const v = r[key];
       if (v) ys.add(v.slice(0, 4));
     }
@@ -287,7 +369,7 @@ function collectYears() {
   return [...ys].sort((a, b) => b.localeCompare(a));
 }
 
-const YEARS = collectYears();
+let YEARS = collectYears();
 const currentYear = String(new Date().getFullYear());
 let selectedYear = YEARS.includes(currentYear) ? currentYear : (YEARS[0] || currentYear);
 
@@ -307,7 +389,7 @@ function statRows(view, rows) {
   const end = todayStr();
   const d = new Date();
   const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 29).toLocaleDateString("sv-SE");
-  return (DATA.daily || []).filter(r => r.date >= start && r.date <= end);
+  return (VIEW.daily || []).filter(r => r.date >= start && r.date <= end);
 }
 // returns the average shown on the Avg card (null when there is nothing to average)
 function renderStats(view, rows) {
@@ -335,8 +417,22 @@ function renderStats(view, rows) {
   return avg;
 }
 
+// ---- prompt cache ------------------------------------------------------------------------------------------
+// Hit rate = cache reads / (input + cache writes + cache reads). Saving = what the cache saved at today's prices (see
+// pricing.mjs); only the logs source can say (the ccusage source has no price table) — otherwise "—".
+const fmtUsdSigned = n => (n < 0 ? "−$" + Math.abs(n).toFixed(2) : "$" + n.toFixed(2));
+function renderCache(rows) {
+  const sum = k => rows.reduce((s, r) => s + (r[k] || 0), 0);
+  const read = sum("cacheReadTokens");
+  const side = sum("inputTokens") + sum("cacheCreationTokens") + read;
+  const hasSaved = rows.some(r => typeof r.cacheSaved === "number");
+  document.getElementById("cache-rate").textContent = side ? (read / side * 100).toFixed(1) + "%" : "—";
+  document.getElementById("cache-served").textContent = rows.length ? fmtCompact(read) : "—";
+  document.getElementById("cache-saved").textContent = hasSaved ? fmtUsdSigned(sum("cacheSaved")) : "—";
+}
+
 // ---- project rows -----------------------------------------------------------------------------------------
-// One row per project (working directory) from the DATA.projects rows that `keep` accepts, shaped like a period row so
+// One row per project (working directory) from the VIEW.projects rows that `keep` accepts, shaped like a period row so
 // the charts, the table and the Total row work unchanged. `lastDate` = the latest day with usage.
 // Privacy mode (the eye next to the theme toggle): every project name / path on screen — table, chart axis, tooltips,
 // cards — is replaced by **** per path segment ("~/ok/app" → "~/****/****"); the structure stays, the names do not.
@@ -347,26 +443,29 @@ function maskName(s) {
   if (!privacy || UNMASKED_LABEL.test(s)) return s;
   return s.replace(/[^\\/]+/g, seg => (seg === "~" || /^[A-Za-z]:$/.test(seg) ? seg : MASK));
 }
+// free text (session titles, branch names, repositories) is masked as a whole
+const maskText = s => (privacy && s ? MASK : s);
 const pathParts = path => path.split(/[\\/]/).filter(Boolean);
 const tail = (path, k) => (path === "" ? "(unattributed)" : pathParts(path).slice(-k).join("/") || path);
 function projectRows(keep) {
   const byPath = new Map();
-  const measuredDays = HAS_TIME ? new Set(DATA.time.days.map(([d]) => d)) : new Set();
-  for (const p of DATA.projects) {
+  const measuredDays = HAS_TIME ? new Set(VIEW.time.days.map(([d]) => d)) : new Set();
+  for (const p of VIEW.projects) {
     if (!keep(p)) continue;
     let r = byPath.get(p.project);
-    if (!r) byPath.set(p.project, r = { path: p.project, totalCost: 0, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, lastDate: "", activeSeconds: null, timeCost: 0, models: new Map() });
+    if (!r) byPath.set(p.project, r = { path: p.project, totalCost: 0, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, lastDate: "", activeSeconds: null, timeCost: 0, cacheSaved: 0, models: new Map() });
     r.totalCost += p.cost || 0;
     if (HAS_TIME && measuredDays.has(p.date)) r.timeCost += p.cost || 0; // the rate counts only the cost of days whose time was measured
     r.inputTokens += p.input || 0;
     r.outputTokens += p.output || 0;
     r.cacheCreationTokens += p.cacheCreation || 0;
     r.cacheReadTokens += p.cacheRead || 0;
+    r.cacheSaved += p.saved || 0;
     if (p.date > r.lastDate) r.lastDate = p.date;
     r.models.set(p.model, (r.models.get(p.model) || 0) + (p.cost || 0));
   }
   if (HAS_TIME) { // active seconds per project over the same days; a project without any measured time stays null ("—")
-    for (const [date, project, seconds] of DATA.time.projects || []) {
+    for (const [date, project, seconds] of VIEW.time.projects || []) {
       const r = byPath.get(project);
       if (r && keep({ date })) r.activeSeconds = (r.activeSeconds ?? 0) + seconds;
     }
@@ -413,13 +512,13 @@ const avgLinePlugin = {
     ctx.font = "500 9px system-ui, sans-serif";
     ctx.textAlign = "right";
     ctx.textBaseline = "bottom";
-    ctx.fillText(`${opts.label || "Avg"} ${fmtUsd(opts.value)}`, chartArea.right - 4, y - 3);
+    ctx.fillText(`Avg ${fmtUsd(opts.value)}`, chartArea.right - 4, y - 3);
     ctx.restore();
   },
 };
 
 // The two charts: a stacked bar (labels × models) and the doughnut (cost by model). `avg` (optional) draws the average line.
-function drawCharts({ labels, datasets, byModel, tooltipTitle, avg = null, avgLabel = "Avg" }) {
+function drawCharts({ labels, datasets, byModel, tooltipTitle, avg = null }) {
   const cc = chartColors();
   if (barChart) barChart.destroy();
   barChart = new Chart(document.getElementById("bar"), {
@@ -429,8 +528,9 @@ function drawCharts({ labels, datasets, byModel, tooltipTitle, avg = null, avgLa
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      ...(printing ? { animation: false } : {}), // a half-drawn frame must not reach the paper
       plugins: {
-        avgLine: { value: avg, label: avgLabel },
+        avgLine: { value: avg },
         legend: { labels: { color: cc.legend, boxWidth: 12 } },
         tooltip: { callbacks: {
           title: tooltipTitle,
@@ -460,6 +560,7 @@ function drawCharts({ labels, datasets, byModel, tooltipTitle, avg = null, avgLa
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      ...(printing ? { animation: false } : {}),
       plugins: {
         legend: { position: "bottom", labels: { color: cc.legend, boxWidth: 12 } },
         tooltip: { callbacks: { label: c => `${c.label}: ${fmtUsd(c.parsed)}` } },
@@ -484,7 +585,7 @@ function modelDatasets(rows) {
 // ---- active time ------------------------------------------------------------------------------------------
 // Seconds of active work (gaps between events up to `idleMinutes` long; parallel sessions counted once), formatted
 // 45m · 3h 12m · 5d 3h (a day = 24 hours of activity). "—" = not measured; "≥ " = a period with some unmeasured days.
-const HAS_TIME = !!DATA.time;
+let HAS_TIME = !!VIEW.time;
 function fmtDuration(sec) {
   const m = Math.round(sec / 60);
   if (sec > 0 && m === 0) return "<1m";
@@ -514,10 +615,10 @@ function sumPeriodTimes(rows) {
 }
 // real time over a date range (all projects united), from the per-day totals
 function rangeTime(start, end) {
-  const known = new Map(DATA.time.days);
+  const known = new Map(VIEW.time.days);
   const inRange = d => d >= start && d <= end;
   const seconds = [...known].filter(([d]) => inRange(d)).reduce((s, [, v]) => s + v, 0);
-  const days = (DATA.daily || []).filter(r => inRange(r.date));
+  const days = (VIEW.daily || []).filter(r => inRange(r.date));
   const measured = days.filter(r => known.has(r.date));
   const cost = measured.reduce((s, r) => s + (r.totalCost || 0), 0);
   return { seconds: measured.length || seconds ? seconds : null, cost, partial: measured.length < days.length };
@@ -527,7 +628,7 @@ function rangeTime(start, end) {
 const MIN_RATE_SECONDS = 60;
 const rateText = t => (t && t.seconds >= MIN_RATE_SECONDS ? (t.partial ? "~ " : "") + fmtUsd(t.cost / (t.seconds / 3600)) + "/h" : "—");
 const timeCells = t => (HAS_TIME ? `\n      <td class="num">${esc(timeText(t))}</td>\n      <td class="num">${esc(rateText(t))}</td>` : "");
-const columnCount = view => 7 + (HAS_TIME ? 2 : 0) + (view === "projects" ? 1 : 0);
+const columnCount = view => 7 + (HAS_TIME ? 2 : 0) + (view === "projects" || view === "sessions" ? 1 : 0);
 
 const totalRowHtml = (label, t, models, lastDate, time) => `
       <td>${label}</td>
@@ -539,20 +640,68 @@ const totalRowHtml = (label, t, models, lastDate, time) => `
       <td>${models.map(m => esc(shortModel(m))).join(", ")}</td>${lastDate === undefined ? "" : `\n      <td class="nowrap">${esc(lastDate)}</td>`}
     `;
 
-// Controls that depend on the tab: the year drop-down (not on Today, hidden on Projects), the period chips (Projects only)
+// ---- printing ----------------------------------------------------------------------------------------------
+// What a printed page says about itself: the controls that carry the year or the period (tabs, year drop-down, chips) are not
+// printed, so the tab and its period are written out — under the heading and, on every page, in the page header.
+const VIEW_NAME = { today: "Today", daily: "Daily", weekly: "Weekly", monthly: "Monthly", projects: "Projects", sessions: "Sessions" };
+function printContext(view) {
+  const period = view === "today" ? todayStr() : view === "projects" || view === "sessions" ? RANGE_TEXT[projectRange] : `year ${selectedYear}`;
+  return `${VIEW_NAME[view]} · ${period}`;
+}
+function renderPrintContext(view) {
+  document.getElementById("print-context").textContent = printContext(view);
+}
+// A margin box cannot hold a clickable link, so the printed footer spells the address out: whoever reads a printout can find and
+// install the package. Keep it in step with the npm link in the page footer (a test compares them).
+const PACKAGE_PAGE = "npmjs.com/package/ai-usage-cost";
+let printing = false;
+let themeBeforePrint = null;
+const cssString = s => `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\r\n]+/g, " ")}"`;
+// Paper is white: draw the charts in the light palette (a canvas keeps the colours it was drawn with) and without animation,
+// then put everything back. The stored theme preference is never touched.
+window.addEventListener("beforeprint", () => {
+  themeBeforePrint = document.documentElement.getAttribute("data-theme");
+  document.documentElement.setAttribute("data-theme", "light");
+  printing = true;
+  render(currentView());
+  let style = document.getElementById("print-dynamic-styles");
+  if (!style) {
+    style = document.createElement("style");
+    style.id = "print-dynamic-styles";
+    document.head.appendChild(style);
+  }
+  const font = "font: 8pt ui-sans-serif, system-ui, sans-serif; color: #666;";
+  style.textContent = `@media print { @page { @top-left { content: ${cssString(`${agent.label} AI Usage Dashboard · ${printContext(currentView())}`)}; ${font} } @bottom-left { content: ${cssString(`${PACKAGE_PAGE}${DATA.version ? " · v" + DATA.version : ""}`)}; ${font} } } }`;
+});
+window.addEventListener("afterprint", () => {
+  if (themeBeforePrint !== null) document.documentElement.setAttribute("data-theme", themeBeforePrint);
+  themeBeforePrint = null;
+  printing = false;
+  const style = document.getElementById("print-dynamic-styles");
+  if (style) style.remove();
+  render(currentView());
+});
+document.getElementById("print-btn").addEventListener("click", () => window.print());
+
+// Controls that depend on the tab: the year drop-down (not on Today, hidden on Projects / Sessions), the period chips
+// (Projects and Sessions) and the sessions strip (Sessions only)
 function syncControls(view) {
-  yearSelect.disabled = view === "today" || view === "projects";
-  yearSelect.hidden = view === "projects";
-  document.getElementById("range-group").hidden = view !== "projects";
-  document.getElementById("th-last").hidden = view !== "projects";
+  const periodView = view === "projects" || view === "sessions";
+  yearSelect.disabled = view === "today" || periodView;
+  yearSelect.hidden = periodView;
+  document.getElementById("range-group").hidden = !periodView;
+  document.getElementById("session-strip").hidden = view !== "sessions";
+  document.getElementById("th-last").hidden = !periodView;
   document.getElementById("th-time").hidden = !HAS_TIME;
   document.getElementById("th-rate").hidden = !HAS_TIME;
 }
 
 function render(view) {
   syncControls(view);
+  renderPrintContext(view);
   if (view === "projects") return renderProjects();
-  const byProject = view === "today" && Array.isArray(DATA.projects);
+  if (view === "sessions") return renderSessions();
+  const byProject = view === "today" && Array.isArray(VIEW.projects);
   const rows = byProject ? todayRows() : rowsForView(view);
   const keyField = KEY_BY_VIEW[view];
   const labelOf = byProject ? (r => maskName(r.label)) : (r => r[keyField]);
@@ -561,6 +710,7 @@ function render(view) {
   const totalCost = rows.reduce((s, r) => s + (r.totalCost || 0), 0);
 
   const avg = renderStats(view, rows);
+  renderCache(rows);
 
   const periodLabel = { today: "today", daily: "day", weekly: "week", monthly: "month" }[view] || view;
   document.getElementById("bar-title").textContent = byProject ? "Cost per project today (by model)" : `Cost per ${periodLabel} (by model)`;
@@ -759,9 +909,9 @@ function renderProjects() {
     byModel: aggregateByModel(flat),
     tooltipTitle: items => (items.length ? bars[items[0].dataIndex].path : ""),
     avg: avgCost,
-    avgLabel: "Avg / project",
   });
 
+  renderCache(flat);
   renderProjectTable(flat);
 }
 
@@ -791,9 +941,132 @@ function renderProjectTable(flat) {
   });
 }
 
+// ---- Sessions tab -----------------------------------------------------------------------------------------
+// One row per Claude Code session — the unit of work: people tend to start a session (and a branch, and a pull request) per
+// task, so these three are the same rows under three names. The branch and the pull requests are therefore labels in the
+// row, not groupings: grouping by pull request would have to charge a session's whole cost to each of its PRs (a session
+// that merged 23 of them would count 23 times). A session belongs to the period of its last message and counts with its
+// whole cost. Sessions overlap in time, so the Total has no Time / Rate.
+const dateOfMs = ms => new Date(ms).toLocaleDateString("sv-SE");
+
+// one session's cost rows [branch, model, subagent, input, output, cacheWrite, cacheRead, cacheWrite1h, thinking, cost, saved] added up
+function sessionStats(s) {
+  const t = { cost: 0, input: 0, output: 0, cacheCreation: 0, cacheRead: 0, thinking: 0, saved: 0, sideCost: 0, models: new Map() };
+  for (const [, model, side, input, output, cw, cr, , thinking, cost, saved] of s.rows) {
+    t.cost += cost; t.input += input; t.output += output; t.cacheCreation += cw; t.cacheRead += cr; t.thinking += thinking; t.saved += saved;
+    if (side) t.sideCost += cost;
+    t.models.set(model, (t.models.get(model) || 0) + cost);
+  }
+  return t;
+}
+// `HEAD` is what git reports when no branch is checked out (detached HEAD) — not a name, so it is neither masked nor shown as one
+const isRealBranch = b => b && b !== "HEAD";
+const branchLabel = b => (!b ? "(no branch)" : b === "HEAD" ? "(detached HEAD)" : maskText(b));
+const shortId = id => (id ? id.slice(0, 8) : "(unknown)");
+const prText = pr => `${maskText(pr[0])}#${pr[1]}`;
+function sessionTitle(s) {
+  const branches = [...new Set(s.rows.map(r => r[0]).filter(Boolean))].map(branchLabel).join(", ");
+  return [s.project ? maskName(s.project) : "", branches, shortId(s.id), s.prs.map(prText).join(", ")].filter(Boolean).join(" · ");
+}
+// the small grey line under the title: the branch the session worked on (when there is a real one) and how many PRs it linked
+function sessionNote(s) {
+  const branches = [...new Set(s.rows.map(r => r[0]).filter(isRealBranch))];
+  const parts = [];
+  if (branches.length) parts.push(maskText(branches[0]) + (branches.length > 1 ? ` +${branches.length - 1}` : ""));
+  if (s.prs.length) parts.push(`${s.prs.length} PR${s.prs.length === 1 ? "" : "s"}`);
+  return parts.join(" · ");
+}
+// project-row-like objects, so the table, the chart and the totals work unchanged
+function sessionGroups(list) {
+  return list.map(s => {
+    const models = [...sessionStats(s).models.entries()].sort((a, b) => b[1] - a[1]);
+    const g = { label: s.title ? maskText(s.title) : `(untitled) ${shortId(s.id)}`, title: sessionTitle(s), note: sessionNote(s), totalCost: 0, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0,
+      lastMs: s.t1, lastDate: dateOfMs(s.t1), activeSeconds: s.seconds > 0 ? s.seconds : null, modelsUsed: models.map(([m]) => m), modelBreakdowns: models.map(([modelName, cost]) => ({ modelName, cost })) };
+    for (const [, , , input, output, cw, cr, , , cost] of s.rows) {
+      g.totalCost += cost; g.inputTokens += input; g.outputTokens += output; g.cacheCreationTokens += cw; g.cacheReadTokens += cr;
+    }
+    return g;
+  });
+}
+
+function renderSessions() {
+  const start = rangeStart(projectRange);
+  const end = todayStr();
+  const list = VIEW.sessions.filter(s => { const d = dateOfMs(s.t1); return d >= start && d <= end; });
+  // the table lists the most recently active session first; the chart shows the most expensive ones
+  const groups = sessionGroups(list).sort((a, b) => b.lastMs - a.lastMs || b.totalCost - a.totalCost || a.label.localeCompare(b.label));
+  const byCost = [...groups].sort((a, b) => b.totalCost - a.totalCost || b.lastMs - a.lastMs || a.label.localeCompare(b.label));
+  document.getElementById("th-first").textContent = "Session";
+  document.getElementById("bar-title").textContent = `Cost per session, ${RANGE_TEXT[projectRange]}${groups.length > BARS_BEFORE_MORE ? ` — the ${BARS_BEFORE_MORE} biggest of ${groups.length}` : ""} (by model)`;
+  document.querySelectorAll(".chip").forEach(b => b.classList.toggle("active", b.dataset.range === projectRange));
+
+  // what the period holds, session by session
+  const stats = list.map(sessionStats);
+  const sum = k => stats.reduce((s, t) => s + t[k], 0);
+  renderCache(stats.map(t => ({ inputTokens: t.input, cacheCreationTokens: t.cacheCreation, cacheReadTokens: t.cacheRead, cacheSaved: t.saved })));
+  const pct = (a, b) => (b > 0 ? (a / b * 100).toFixed(1) + "%" : "—");
+  document.getElementById("sess-count").textContent = String(list.length);
+  document.getElementById("sess-side").textContent = list.length && can("subagents") ? pct(sum("sideCost"), sum("cost")) : "—";
+  document.getElementById("sess-think").textContent = list.length && can("thinking") ? pct(sum("thinking"), sum("output")) : "—";
+
+  // cards: cheapest / average / most expensive session
+  const set = (id, label, value) => {
+    document.getElementById("kpi-" + id + "-label").textContent = label;
+    document.getElementById("kpi-" + id).textContent = value;
+  };
+  let avgCost = null;
+  if (!groups.length) {
+    set("min", "Min cost / session", "—");
+    set("avg", "Avg cost / session", "—");
+    set("max", "Max cost / session", "—");
+  } else {
+    const lo = groups.reduce((a, g) => (g.totalCost < a.totalCost ? g : a));
+    const hi = groups.reduce((a, g) => (g.totalCost > a.totalCost ? g : a));
+    avgCost = groups.reduce((s, g) => s + g.totalCost, 0) / groups.length;
+    set("min", `Min cost / session · ${lo.label}`, fmtUsd(lo.totalCost));
+    set("avg", `Avg cost / session · ${groups.length} session${groups.length === 1 ? "" : "s"}`, fmtUsd(avgCost));
+    set("max", `Max cost / session · ${hi.label}`, fmtUsd(hi.totalCost));
+  }
+
+  // chart: the biggest sessions only. Unlike Projects there is no "+N more" bar: with dozens of sessions it would be the sum of
+  // all the small ones and tower over every real session (and over the average line that compares single sessions)
+  const bars = byCost.slice(0, BARS_BEFORE_MORE).map(g => ({ label: g.label, path: g.title || g.label, row: g }));
+  drawCharts({
+    labels: bars.map(b => b.label),
+    datasets: modelDatasets(bars.map(b => b.row)),
+    byModel: aggregateByModel(stats.map(t => ({ modelBreakdowns: [...t.models].map(([modelName, cost]) => ({ modelName, cost })) }))),
+    tooltipTitle: items => (items.length ? bars[items[0].dataIndex].path : ""),
+    avg: avgCost,
+  });
+
+  const tbody = document.querySelector("#tbl tbody");
+  tbody.innerHTML = "";
+  if (!groups.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="empty" colspan="${columnCount("sessions")}">No sessions in this period.</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
+  const all = { totalCost: sum("cost"), inputTokens: sum("input"), outputTokens: sum("output"), cacheCreationTokens: sum("cacheCreation"), cacheReadTokens: sum("cacheRead") };
+  const models = [...stats.reduce((m, t) => { t.models.forEach((c, k) => m.set(k, (m.get(k) || 0) + c)); return m; }, new Map())].sort((a, b) => b[1] - a[1]).map(([m]) => m);
+  const totalTr = document.createElement("tr");
+  totalTr.className = "total";
+  totalTr.innerHTML = totalRowHtml("Total", all, models, list.reduce((d, s) => { const x = dateOfMs(s.t1); return x > d ? x : d; }, ""), HAS_TIME ? { seconds: null } : undefined);
+  tbody.appendChild(totalTr);
+  groups.forEach(g => {
+    const tr = document.createElement("tr");
+    const time = HAS_TIME ? { seconds: g.activeSeconds, cost: g.totalCost, partial: false } : undefined;
+    tr.innerHTML = totalRowHtml(esc(g.label) + (g.note ? `<span class="cell-note">${esc(g.note)}</span>` : ""), g, g.modelsUsed, g.lastDate, time).replace("<td>", `<td title="${esc(g.title)}">`);
+    tbody.appendChild(tr);
+  });
+}
+
 const yearSelect = document.getElementById("year-select");
-yearSelect.innerHTML = YEARS.map(y => `<option value="${y}"${y === selectedYear ? " selected" : ""}>${y}</option>`).join("")
-  || `<option value="${selectedYear}" selected>${selectedYear}</option>`;
+function fillYears() {
+  yearSelect.innerHTML = YEARS.map(y => `<option value="${y}"${y === selectedYear ? " selected" : ""}>${y}</option>`).join("")
+    || `<option value="${selectedYear}" selected>${selectedYear}</option>`;
+}
+fillYears();
 
 function currentView() {
   const active = document.querySelector(".tab.active");
@@ -817,12 +1090,50 @@ document.querySelectorAll(".chip").forEach(btn => {
   btn.addEventListener("click", () => {
     projectRange = btn.dataset.range;
     treeToggles.clear();
-    render("projects");
+    render(currentView()); // the same period chips serve the Projects and the Sessions tab
   });
 });
 
-// the Projects tab needs per-project data (built-in log reader, "projects": "on")
-if (!Array.isArray(DATA.projects)) document.getElementById("tab-projects").hidden = true;
+
+// What the agent on screen can show. The Projects tab needs per-project data, the Sessions tab per-session data, the cache
+// panel cache tokens; the divider between the time tabs and those two has nothing to divide when both are missing.
+let HAS_SESSIONS = Array.isArray(VIEW.sessions) && VIEW.sessions.length > 0;
+const privacyBtn = document.getElementById("privacy-toggle");
+function syncAgentChrome() {
+  const title = `${agent.label} AI Usage Dashboard`;
+  document.getElementById("page-title").textContent = title;
+  document.title = title;
+  renderSub();
+  const select = document.getElementById("agent-select");
+  select.hidden = AGENTS.length < 2; // with one agent the heading already says which
+  select.value = agent.id;
+  document.getElementById("tab-projects").hidden = !Array.isArray(VIEW.projects);
+  document.getElementById("tab-sessions").hidden = !HAS_SESSIONS;
+  document.getElementById("tab-sep").hidden = document.getElementById("tab-projects").hidden && document.getElementById("tab-sessions").hidden;
+  document.getElementById("cache-strip").hidden = !can("cache");
+  privacyBtn.hidden = !Array.isArray(VIEW.projects) && !HAS_SESSIONS;
+}
+
+// switch to another agent: its data, its years, its tabs; a tab it cannot show falls back to Today
+function useAgent(id) {
+  agent = AGENTS.find(a => a.id === id) ?? AGENTS[0];
+  VIEW = agent === AGENTS[0] ? DATA : DATA.more[agent.id];
+  HAS_TIME = !!VIEW.time;
+  HAS_SESSIONS = Array.isArray(VIEW.sessions) && VIEW.sessions.length > 0;
+  YEARS = collectYears();
+  selectedYear = YEARS.includes(currentYear) ? currentYear : (YEARS[0] || currentYear);
+  fillYears();
+  treeToggles.clear();
+  syncAgentChrome();
+  const tab = document.querySelector(".tab.active");
+  if (tab && tab.hidden) {
+    document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.view === "today"));
+  }
+  render(currentView());
+}
+const agentSelect = document.getElementById("agent-select");
+agentSelect.innerHTML = AGENTS.map(a => `<option value="${esc(a.id)}">${esc(a.label)}</option>`).join("");
+agentSelect.addEventListener("change", () => useAgent(agentSelect.value));
 
 function historyLabel() {
   const h = DATA.history;
@@ -836,7 +1147,10 @@ function priceLabel() {
   const old = p.ageDays >= 7 ? " — outdated, go online to refresh" : "";
   return " · prices as of " + p.asOf + how + old;
 }
-document.getElementById("sub").textContent = "Generated at " + fmtGenerated(DATA.generatedAt) + " · data from local Claude Code logs" + (DATA.source ? " · read via " + DATA.source : "") + historyLabel() + priceLabel();
+// the line under the heading; "data from local <tool> logs" names the tool on screen
+function renderSub() {
+  document.getElementById("sub").textContent = "Generated at " + fmtGenerated(DATA.generatedAt) + ` · data from local ${agent.label} logs` + (DATA.source ? " · read via " + DATA.source : "") + historyLabel() + priceLabel();
+}
 if (DATA.unpriced && DATA.unpriced.length) {
   const n = document.getElementById("notice");
   n.textContent = "No price known for: " + DATA.unpriced.join(", ") + ". Their cost is counted as $0 — add rates under \"prices\" in config.json or update the package.";
@@ -845,7 +1159,9 @@ if (DATA.unpriced && DATA.unpriced.length) {
 document.getElementById("footer-year").textContent = new Date().getFullYear();
 document.getElementById("footer-version").textContent = DATA.version ? "v" + DATA.version : "";
 
-// Theme toggle
+// Theme toggle (the key was "ccusage-theme" before the package was renamed to ai-usage-cost; the old value is still read once)
+const THEME_KEY = "ai-usage-cost-theme";
+const OLD_THEME_KEY = "ccusage-theme";
 const iconSun  = document.getElementById("icon-sun");
 const iconMoon = document.getElementById("icon-moon");
 
@@ -853,11 +1169,11 @@ function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
   iconSun.style.display  = theme === "light" ? "none"  : "";
   iconMoon.style.display = theme === "light" ? ""      : "none";
-  try { localStorage.setItem("ccusage-theme", theme); } catch { /* storage unavailable (e.g. privacy mode) */ }
+  try { localStorage.setItem(THEME_KEY, theme); } catch { /* storage unavailable (e.g. privacy mode) */ }
 }
 
 let savedTheme = null;
-try { savedTheme = localStorage.getItem("ccusage-theme"); } catch { /* storage unavailable */ }
+try { savedTheme = localStorage.getItem(THEME_KEY) || localStorage.getItem(OLD_THEME_KEY); } catch { /* storage unavailable */ }
 applyTheme(savedTheme || "dark");
 
 document.getElementById("theme-toggle").addEventListener("click", () => {
@@ -867,8 +1183,6 @@ document.getElementById("theme-toggle").addEventListener("click", () => {
 });
 
 // Privacy toggle: eye open = names shown (default, not remembered), eye closed = names masked. Pointless without project data.
-const privacyBtn = document.getElementById("privacy-toggle");
-privacyBtn.hidden = !Array.isArray(DATA.projects);
 function applyPrivacy() {
   document.getElementById("icon-eye").style.display = privacy ? "none" : "";
   document.getElementById("icon-eye-off").style.display = privacy ? "" : "none";
@@ -879,6 +1193,7 @@ function applyPrivacy() {
   privacyBtn.setAttribute("aria-label", label);
 }
 applyPrivacy();
+syncAgentChrome();
 privacyBtn.addEventListener("click", () => {
   privacy = !privacy;
   applyPrivacy();

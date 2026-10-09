@@ -7,13 +7,14 @@ import { PREFIX_RE, installDashboard, installSkill, installedPrefixes } from "..
 import { commandsDir, dashboardDir, skillsDir } from "../lib/system.mjs";
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
+const DEFAULT_PREFIX = "ai"; // → /ai-usage
 const HELP = `Usage: install.mjs [--dashboard | --skill] [--prefix <name>] [--force]
 
   (no flag)     install the dashboard files and the /<prefix>-usage skill
   --dashboard   install only the dashboard files into <claude dir>/dashboard
   --skill       install only the skill into <claude dir>/skills/<prefix>-usage (--command is a deprecated alias;
                 a slash command installed by <= 1.2.x is removed and replaced by the skill)
-  --prefix      skill prefix: /<prefix>-usage (or set CC_USAGE_PREFIX)
+  --prefix      skill prefix: /<prefix>-usage (or set AI_USAGE_PREFIX; the old name CC_USAGE_PREFIX still works)
   --force       reinstall even if the installed version is current, or overwrite a foreign skill file
 
 <claude dir> is $CLAUDE_CONFIG_DIR or ~/.claude.
@@ -35,10 +36,10 @@ function parseArgs(argv) {
 }
 
 async function resolvePrefix(opts) {
-  let prefix = opts.prefix ?? process.env.CC_USAGE_PREFIX;
+  let prefix = opts.prefix ?? process.env.AI_USAGE_PREFIX ?? process.env.CC_USAGE_PREFIX; // CC_ = the name before 1.3.0
   if (!prefix) {
     const existing = installedPrefixes({ skillsDir: skillsDir(), commandsDir: commandsDir() })[0];
-    const fallback = existing ?? "my";
+    const fallback = existing ?? DEFAULT_PREFIX; // an already installed prefix wins, so an upgrade keeps the command the user types
     if (process.stdin.isTTY) {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       const answer = await rl.question(`Prefix (the skill will be invoked as /<prefix>-usage) [${fallback}]: `);
@@ -79,6 +80,6 @@ async function main() {
 }
 
 main().catch(e => {
-  console.error(`ccusage-ui-dashboard: ${e.message}`);
+  console.error(`ai-usage-cost: ${e.message}`);
   process.exitCode = 1;
 });

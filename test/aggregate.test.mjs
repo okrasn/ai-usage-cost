@@ -69,3 +69,12 @@ test("weekKeyWithinYear leaves ordinary weeks alone and a week that starts on Ja
   assert.equal(weekKeyWithinYear("2025-12-31", 1), "2025-12-29");
   assert.equal(weekKeyWithinYear("2024-02-29", 0), "2024-02-25"); // leap day, no split
 });
+
+test("weekly and monthly rows add up the estimated cache saving of their days (rows without one count as 0)", () => {
+  const rows = normalizeDaily({ daily: [classicRow("2026-10-05", 1), classicRow("2026-10-06", 1), classicRow("2026-09-30", 1)] });
+  rows.find(r => r.date === "2026-10-05").cacheSaved = 1.5;
+  rows.find(r => r.date === "2026-10-06").cacheSaved = 2;
+  const p = buildPeriods(rows, { weekStart: "monday" });
+  assert.deepEqual(p.monthly.map(m => m.cacheSaved), [0, 3.5], "September has none, October 1.5 + 2");
+  assert.deepEqual(p.weekly.map(w => w.cacheSaved), [0, 3.5]);
+});

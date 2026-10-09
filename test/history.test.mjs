@@ -7,7 +7,7 @@ import { loadHistory, mergeBuckets, saveHistory } from "../lib/history.mjs";
 import { bucketsToCells } from "../lib/logs.mjs";
 
 const tmp = () => join(mkdtempSync(join(tmpdir(), "ccud-hist-")), "history.json");
-const b = (t, model, input = 1, output = 2, cacheCreation = 3, cacheRead = 4, cost = null, project = "") => ({ t, project, model, input, output, cacheCreation, cacheRead, cost });
+const b = (t, model, input = 1, output = 2, cacheCreation = 3, cacheRead = 4, cost = null, project = "") => ({ t, project, model, input, output, cacheCreation, cacheCreation1h: 0, cacheRead, agent: "claude", cost });
 // 1 USD per million tokens of every kind keeps the arithmetic in the tests obvious
 const flat = rate => () => ({ input: rate, output: rate, cacheWrite: rate, cacheRead: rate });
 const Q = 900000;
@@ -24,8 +24,8 @@ test("save → load round-trips, with a compact model table and no text fields",
   const back = loadHistory(p);
   assert.equal(back.status, "ok");
   assert.deepEqual(back.buckets, data);
-  assert.deepEqual(Object.keys(raw).sort(), ["models", "note", "projects", "rows", "schema", "timeAll", "timeProjects", "updatedAt"], "only counts and names, no content");
-  assert.deepEqual(raw.rows[0], [100, 0, 0, 1, 2, 3, 4, 0.25], "project index, model index, tokens, and the cost travels with the bucket");
+  assert.deepEqual(Object.keys(raw).sort(), ["agents", "branches", "models", "note", "projects", "rows", "schema", "sessionRows", "sessions", "timeAll", "timeProjects", "updatedAt"], "only counts and names (plus session titles, see the sessions tests), no prompts");
+  assert.deepEqual(raw.rows[0], [100, 0, 0, 1, 2, 3, 4, 0, 0, 0.25], "project, model, tokens, 1-hour cache writes, agent index, and the cost travels with the bucket");
   assert.deepEqual(raw.rows[1].at(-1), null, "no price known → null, not 0");
 });
 
@@ -149,12 +149,12 @@ test("a schema 1 file (no projects) is read, flagged legacy and rewritten in the
   writeFileSync(p, JSON.stringify({ schema: 1, models: ["m"], rows: [[10, 0, 1, 2, 3, 4, 0.5]] }));
   const r = loadHistory(p);
   assert.equal(r.status, "ok");
-  assert.deepEqual(r.buckets, [{ t: 10, project: "", legacy: true, model: "m", input: 1, output: 2, cacheCreation: 3, cacheRead: 4, cost: 0.5 }]);
+  assert.deepEqual(r.buckets, [{ t: 10, project: "", legacy: true, model: "m", input: 1, output: 2, cacheCreation: 3, cacheCreation1h: 0, cacheRead: 4, agent: "claude", cost: 0.5 }]);
   const merged = mergeBuckets(r.buckets, [], flat(1));
   assert.equal(merged.changed, true, "a surviving legacy row must be written back in the new format");
   assert.equal("legacy" in merged.buckets[0], false);
   saveHistory(p, merged.buckets);
-  assert.equal(JSON.parse(readFileSync(p, "utf8")).schema, 3);
+  assert.equal(JSON.parse(readFileSync(p, "utf8")).schema, 5);
   assert.equal(mergeBuckets(loadHistory(p).buckets, [], flat(1)).changed, false, "after the migration nothing is pending");
 });
 

@@ -12,12 +12,14 @@ import { classicRow } from "./helpers.mjs";
 const TEMPLATE = readFileSync(new URL("../template.html", import.meta.url), "utf8");
 const NOW = new Date(2026, 9, 8, 12, 0, 0); // local 2026-10-08
 
-function openPage(dailyRows, { projects, time, generatedAt = NOW.toISOString() } = {}) {
+function openPage(dailyRows, { projects, time, generatedAt = NOW.toISOString(), storage = {}, saved = [], sessions, agents, more, version } = {}) {
   const daily = normalizeDaily({ daily: dailyRows });
   const measured = new Map(time?.days ?? []); // what build.mjs does: each day's active seconds ride on its row
   for (const row of daily) if (measured.has(row.date)) row.activeSeconds = measured.get(row.date);
+  const savedBy = new Map(saved); // date → estimated cache saving (what dailyFromCells attaches in the real pipeline)
+  for (const row of daily) if (savedBy.has(row.date)) row.cacheSaved = savedBy.get(row.date);
   const periods = buildPeriods(daily, { weekStart: "monday" });
-  const html = renderHtml(TEMPLATE, { daily: periods.daily, weekly: periods.weekly, monthly: periods.monthly, generatedAt, unpriced: [], ...(projects ? { projects } : {}), ...(time ? { time } : {}) }, "Tester", "");
+  const html = renderHtml(TEMPLATE, { daily: periods.daily, weekly: periods.weekly, monthly: periods.monthly, generatedAt, unpriced: [], ...(projects ? { projects } : {}), ...(time ? { time } : {}), ...(sessions ? { sessions } : {}), ...(agents ? { agents } : {}), ...(more ? { more } : {}), ...(version ? { version } : {}) }, "");
   const start = html.indexOf("<script>\nconst DATA");
   const script = html.slice(start + "<script>\n".length, html.indexOf("</script>", start));
 
@@ -30,14 +32,21 @@ function openPage(dailyRows, { projects, time, generatedAt = NOW.toISOString() }
       classList: { add: c => flags.add(c), remove: c => flags.delete(c), toggle: (c, force) => ((force ?? !flags.has(c)) ? flags.add(c) : flags.delete(c)), contains: c => flags.has(c) },
       addEventListener: (type, fn) => { handlers[type] = fn; }, setAttribute: (k, v) => { attrs[k] = v; }, getAttribute: k => attrs[k] ?? null,
       appendChild(c) { this.children.push(c); } };
+    el.remove = () => { if (el === styleEl) styleEl = null; };
     let inner = "";
     Object.defineProperty(el, "innerHTML", { get: () => inner, set: v => { inner = v; if (v === "") el.children = []; } });
     return el;
   };
-  const byId = id => { if (!nodes.has(id)) nodes.set(id, makeEl()); return nodes.get(id); };
+  let styleEl = null; // the <style id="print-dynamic-styles"> the page adds while printing: absent until it is appended, like in a browser
+  const byId = id => {
+    if (id === "print-dynamic-styles") return styleEl;
+    if (!nodes.has(id)) nodes.set(id, makeEl());
+    return nodes.get(id);
+  };
   const tbody = makeEl();
-  const tabs = ["today", "daily", "weekly", "monthly", "projects"].map(v => { const t = makeEl(); t.dataset.view = v; return t; });
+  const tabs = ["today", "daily", "weekly", "monthly", "projects", "sessions"].map(v => { const t = makeEl(); t.dataset.view = v; return t; });
   tabs[0].classList.add("active");
+  for (const t of tabs) nodes.set("tab-" + t.dataset.view, t); // in a real page the tab button and the element with that id are one thing
   const chips = ["1d", "7d", "30d", "90d", "1y", "all"].map(r => { const c = makeEl(); c.dataset.range = r; return c; });
   chips.find(c => c.dataset.range === "all").classList.add("active");
   const document = {
@@ -46,13 +55,17 @@ function openPage(dailyRows, { projects, time, generatedAt = NOW.toISOString() }
     querySelectorAll: sel => (sel === ".tab" ? tabs : sel === ".chip" ? chips : []),
     createElement: () => makeEl(),
     documentElement: makeEl(),
+    head: { appendChild: el => { styleEl = el; } },
   };
+  const windowHandlers = {};
+  let printCalls = 0;
+  const window = { addEventListener: (type, fn) => { windowHandlers[type] = fn; }, print: () => { printCalls++; } };
   class FakeDate extends Date {
     constructor(...a) { a.length ? super(...a) : super(NOW.getTime()); }
   }
   const charts = {};
   class FakeChart { constructor(canvas, cfg) { charts[cfg.type] = cfg; } destroy() {} }
-  const ctx = vm.createContext({ document, Date: FakeDate, Chart: FakeChart, localStorage: { getItem: () => null, setItem() {} } });
+  const ctx = vm.createContext({ document, window, Date: FakeDate, Chart: FakeChart, localStorage: { getItem: k => storage[k] ?? null, setItem(k, v) { storage[k] = v; } } });
   vm.runInContext(script, ctx);
 
   const text = id => byId(id).textContent;
@@ -88,6 +101,34 @@ function openPage(dailyRows, { projects, time, generatedAt = NOW.toISOString() }
     // text of the Rate cell of every row (Total first): the 7th numeric cell
     rateCells: () => tbody.children.map(r => [...r.innerHTML.matchAll(/<td class="num"[^>]*>([^<]*)<\/td>/g)].map(m => m[1])[6]),
     subText: () => byId("sub").textContent,
+    // printing: what the browser does around a print job, and what the page then holds
+    firePrint: type => windowHandlers[type](),
+    clickPrintButton: () => byId("print-btn").handlers.click(),
+    printCalls: () => printCalls,
+    printContext: () => byId("print-context").textContent,
+    printStyle: () => (styleEl ? styleEl.textContent : null),
+    theme: () => document.documentElement.getAttribute("data-theme"),
+    clickTheme: () => byId("theme-toggle").handlers.click(),
+    heading: () => ({ h1: byId("page-title").textContent, title: document.title }),
+    agentSelect: () => { const sel = byId("agent-select"); return { hidden: sel.hidden, value: sel.value, options: [...sel.innerHTML.matchAll(/<option value="([^"]*)">([^<]*)<\/option>/g)].map(m => [m[1], m[2]]) }; },
+    chooseAgent: id => { const sel = byId("agent-select"); sel.value = id; sel.handlers.change(); },
+    tabsHidden: () => ({ projects: byId("tab-projects").hidden, sessions: byId("tab-sessions").hidden, sep: byId("tab-sep").hidden }),
+    cacheStripHidden: () => byId("cache-strip").hidden,
+    activeTab: () => tabs.find(t => t.classList.contains("active"))?.dataset.view,
+    sessionStripHidden: () => byId("session-strip").hidden,
+    sessionsTabHidden: () => byId("tab-sessions").hidden,
+    tabSepHidden: () => byId("tab-sep").hidden,
+    sessionStrip: () => ({ count: text("sess-count"), side: text("sess-side"), think: text("sess-think") }),
+    // label (first cell, without the "N sessions" note) and numeric cells of every table row, Total first
+    tableRows: () => tbody.children.map(r => ({
+      label: (r.innerHTML.match(/<td[^>]*>(.*?)<\/td>/)?.[1] ?? "").replace(/<span class="cell-note">.*?<\/span>/, ""),
+      note: r.innerHTML.match(/<span class="cell-note">(.*?)<\/span>/)?.[1] ?? "",
+      title: r.innerHTML.match(/^\s*<td title="([^"]*)">/)?.[1],
+      nums: [...r.innerHTML.matchAll(/<td class="num"[^>]*>([^<]*)<\/td>/g)].map(m => m[1]),
+      last: r.innerHTML.match(/<td class="nowrap">([^<]*)<\/td>/)?.[1],
+      html: r.innerHTML,
+    })),
+    cache: () => ({ rate: text("cache-rate"), served: text("cache-served"), saved: text("cache-saved") }),
     clickPrivacy: () => byId("privacy-toggle").handlers.click(),
     privacyButton: () => { const b = byId("privacy-toggle"); return { hidden: b.hidden, on: b.classList.contains("on"), pressed: b.getAttribute("aria-pressed"), title: b.title, label: b.getAttribute("aria-label"), eye: byId("icon-eye").style.display, eyeOff: byId("icon-eye-off").style.display }; },
     // everything a viewer could read that mentions a project: table html, chart labels, tooltip titles, cards
@@ -828,13 +869,11 @@ test("Average line: Today draws it at the Avg card's value, whether the bars are
   const plain = openPage([...AVG_ROWS]);
   plain.show("today");
   assert.equal(avgOf(plain), 4, "no project data: the Today bars are days");
-  assert.equal(plain.barConfig().options.plugins.avgLine.label, "Avg");
   // daily average over the last 30 days = (30 + 6) / 2 = 18, although both of today's projects cost far less
   const byProject = openPage([D("2026-10-07", 30), D(TODAY, 6)], { projects: [P(TODAY, "~/ok/a", "claude-sonnet-5", 4), P(TODAY, "~/ok/b", "claude-sonnet-5", 2)] });
   byProject.show("today");
   assert.equal(byProject.cards().avg[1], "$18.00");
   assert.equal(avgOf(byProject), 18, "the same value as the card, not the average per project");
-  assert.equal(byProject.barConfig().options.plugins.avgLine.label, "Avg", "the same label as on the other charts");
   assert.ok(byProject.barConfig().options.scales.y.suggestedMax >= 18, "the axis reaches the line even though every bar is lower");
   const noneToday = openPage([D(TODAY, 1)], { projects: [P("2026-10-07", "~/ok/old", "claude-sonnet-5", 1)] });
   noneToday.show("today");
@@ -854,7 +893,6 @@ test("Average line: Projects draws it at the average cost per project; nothing t
   const p = openPage([D(TODAY, 9)], { projects: [PR(TODAY, "~/ok/a", 6), PR(TODAY, "~/ok/b", 2), PR(TODAY, "", 100)] });
   p.clickTab("projects");
   assert.equal(avgOf(p), 4, "(6 + 2) / 2 named projects; unattributed usage is not a project");
-  assert.equal(p.barConfig().options.plugins.avgLine.label, "Avg / project");
   assert.equal(avgOf(p).toFixed(2), p.cards().avg[1].slice(1));
   const empty = openPage([D(TODAY, 1)], { projects: [] });
   empty.clickTab("projects");
@@ -880,9 +918,7 @@ test("Average line: the plugin strokes a red horizontal line across the plot are
   assert.ok(calls.findIndex(c => c[0] === "setLineDash") < calls.findIndex(c => c[0] === "stroke"), "the dash is set before stroking");
   assert.deepEqual(calls.find(c => c[0] === "fillText"), ["fillText", "Avg $4.00", 496, 257]);
   assert.match(ctx.font, /\b9px\b/, "a small label");
-  calls.length = 0;
-  plugin.afterDatasetsDraw(chart, {}, { value: 4, label: "Avg / project" });
-  assert.equal(calls.find(c => c[0] === "fillText")[1], "Avg / project $4.00");
+
   assert.ok(calls.some(c => c[0] === "stroke"));
   // nothing drawn without a value, or when the value falls outside the plot area
   for (const opts of [{ value: null }, undefined, { value: 40 }]) {
@@ -943,7 +979,7 @@ test("Privacy: the eye is next to the theme toggle, open by default, and nothing
   p.show("today");
   assert.deepEqual(p.privacyButton(), { hidden: false, on: false, pressed: "false", title: "Hide project names", label: "Hide project names", eye: "", eyeOff: "none" });
   assert.ok(leaks(p).length > 0, "names are visible");
-  assert.match(TEMPLATE, /<div class="header-actions">\s*<button id="privacy-toggle"[\s\S]*?<button id="theme-toggle"/, "markup order: eye, then theme toggle, in one group");
+  assert.match(TEMPLATE, /<div class="header-actions">\s*<select id="agent-select"[^>]*><\/select>\s*<button id="privacy-toggle"[\s\S]*?<button id="theme-toggle"/, "markup order: AI tool, eye, theme toggle, in one group");
 });
 
 test("Privacy: Today by project — the closed eye masks every segment in the table, titles, chart and tooltip; Total and (unattributed) stay", () => {
@@ -1011,4 +1047,533 @@ test("Privacy: the eye is hidden when the page has no project data, and every pa
   assert.equal(none.privacyButton().hidden, true);
   const fresh = openPage([D(TODAY, 1)], { projects: privacyRows() });
   assert.equal(fresh.privacyButton().on, false, "the choice is not remembered between pages");
+});
+
+// ---- theme storage key (renamed with the package) ------------------------------------------------------------------
+test("Theme: saved under ai-usage-cost-theme; a choice stored under the old ccusage-theme key is still honoured", () => {
+  const stored = {};
+  const p = openPage([D(TODAY, 1)], { storage: stored });
+  assert.deepEqual(Object.keys(stored), ["ai-usage-cost-theme"], "the default theme is written under the new key only");
+  assert.equal(stored["ai-usage-cost-theme"], "dark");
+  const migrated = openPage([D(TODAY, 1)], { storage: { "ccusage-theme": "light" } });
+  assert.equal(migrated.theme(), "light", "the old key is read");
+  const both = openPage([D(TODAY, 1)], { storage: { "ccusage-theme": "light", "ai-usage-cost-theme": "dark" } });
+  assert.equal(both.theme(), "dark", "the new key wins");
+  assert.ok(p);
+});
+
+// ---- the prompt cache strip --------------------------------------------------------------------------------------
+test("Cache strip: hit rate = cache reads / (input + cache writes + cache reads), tokens served from cache, saving", () => {
+  // every classic row: input 10, cache write 30, cache read 40
+  const p = openPage([D("2026-10-06", 1), D("2026-10-07", 1)], { saved: [["2026-10-06", 1.25], ["2026-10-07", 0.5]] });
+  p.show("daily");
+  assert.deepEqual(p.cache(), { rate: "50.0%", served: "80", saved: "$1.75" }, "80 / (20 + 60 + 80); two days of 40 read tokens; 1.25 + 0.5");
+  p.show("monthly");
+  assert.deepEqual(p.cache(), { rate: "50.0%", served: "80", saved: "$1.75" }, "periods add up the same rows");
+  p.show("weekly");
+  assert.equal(p.cache().saved, "$1.75");
+});
+
+test("Cache strip: a cache that cost more than it saved is shown as a negative amount; no usage → dashes", () => {
+  const p = openPage([D("2026-10-07", 1)], { saved: [["2026-10-07", -1.2]] });
+  p.show("daily");
+  assert.equal(p.cache().saved, "−$1.20");
+  const empty = openPage([]);
+  empty.show("daily");
+  assert.deepEqual(empty.cache(), { rate: "—", served: "—", saved: "—" });
+});
+
+test("Cache strip: without a price table (ccusage source) the rate is still shown but the saving is not invented", () => {
+  const p = openPage([D("2026-10-07", 1)]); // no cacheSaved on the row
+  p.show("daily");
+  assert.deepEqual(p.cache(), { rate: "50.0%", served: "40", saved: "—" });
+});
+
+test("Cache strip: compact numbers for big counts", () => {
+  const p = openPage([{ ...D("2026-10-07", 1), cacheReadTokens: 1_418_630_336, inputTokens: 0, cacheCreationTokens: 0 }], { saved: [["2026-10-07", 1] ] });
+  p.show("daily");
+  assert.deepEqual(p.cache(), { rate: "100.0%", served: "1.4B", saved: "$1.00" });
+});
+
+test("Cache strip on Today by project and on Projects: built from the project rows and their saving", () => {
+  // P(): input 100, cache write 300, cache read 400 → 400 / 800
+  const rows = [{ ...P(TODAY, "~/ok/a", "claude-sonnet-5", 5), saved: 0.75 }, { ...P(TODAY, "~/ok/b", "claude-sonnet-5", 3), saved: 0.25 }, { ...P("2026-09-20", "~/ok/old", "claude-sonnet-5", 2, 100, 200, 300, 1000), saved: 4 }];
+  const p = openPage([D(TODAY, 8), D("2026-09-20", 2)], { projects: rows });
+  p.show("today");
+  assert.deepEqual(p.cache(), { rate: "50.0%", served: "800", saved: "$1.00" });
+  p.clickTab("projects");
+  assert.deepEqual(p.cache(), { rate: "60.0%", served: "1.8k", saved: "$5.00" }, "all time adds the old project: 1800 read / (300 + 900 + 1800)");
+  p.clickRange("1d");
+  assert.deepEqual(p.cache(), { rate: "50.0%", served: "800", saved: "$1.00" }, "the period chip narrows the strip too");
+  const none = openPage([D(TODAY, 8)], { projects: [P("2026-09-01", "~/ok/old", "claude-sonnet-5", 1)] });
+  none.clickTab("projects");
+  none.clickRange("1d");
+  assert.deepEqual(none.cache(), { rate: "—", served: "—", saved: "—" }, "nothing in the chosen period");
+});
+
+test("Cache strip: markup and tooltips explain the definitions", () => {
+  assert.match(TEMPLATE, /id="cache-strip"/);
+  assert.match(TEMPLATE, /title="Share of the input-side tokens[^"]*"/);
+  assert.match(TEMPLATE, /title="Estimate at today's prices[^"]*"/);
+});
+
+// ---- the Sessions tab ---------------------------------------------------------------------------------------------
+const ms = (month, day, hour = 12) => new Date(2026, month - 1, day, hour).getTime(); // local, like the page
+// row = [branch, model, subagent, input, output, cacheWrite, cacheRead, cacheWrite1h, thinking, cost, cacheSaved]
+const SR = (branch, cost, over = []) => [branch, "claude-sonnet-5", 0, 1000, 2000, 3000, 4000, 0, 500, cost, 1, ...over];
+const S = (id, over = {}) => ({ id, title: "", project: "~/ok/app", t0: ms(10, 8, 9), t1: ms(10, 8), seconds: 0, prs: [], rows: [SR("main", 1)], ...over });
+const SESSIONS = () => [
+  S("aaaaaaaa-1", { title: "Fix login", seconds: 3600, prs: [["acme/web", 12]], rows: [["feature/login", "claude-sonnet-5", 0, 1000, 2000, 3000, 4000, 0, 500, 6, 1], ["feature/login", "claude-sonnet-5", 1, 100, 200, 300, 400, 0, 50, 2, 0.5]] }),
+  S("bbbbbbbb-1", { project: "~/ok/lib", t1: ms(10, 7), seconds: 0, rows: [["main", "claude-opus-5", 0, 10, 20, 30, 40, 0, 0, 3, 0.1]] }),
+  S("cccccccc-1", { title: "Docs", t0: ms(9, 20, 9), t1: ms(9, 20), seconds: 7200, prs: [["acme/web", 12], ["acme/api", 3]], rows: [["feature/login", "claude-sonnet-5", 0, 1, 1, 1, 1, 0, 1, 1, 0], ["main", "claude-sonnet-5", 0, 2, 2, 2, 2, 0, 2, 4, 0]] }),
+];
+const sessionsPage = (sessions = SESSIONS(), opts = {}) => { const p = openPage([D(TODAY, 1)], { sessions, time: withTime([]), ...opts }); p.clickTab("sessions"); return p; };
+const costs = p => p.tableRows().map(r => r.nums[0]);
+const labels = p => p.tableRows().map(r => r.label);
+
+test("Sessions tab: shown only when the page has sessions; the eye also works with sessions alone", () => {
+  assert.equal(openPage([D(TODAY, 1)], { sessions: SESSIONS() }).sessionsTabHidden(), false);
+  assert.equal(openPage([D(TODAY, 1)], { sessions: [] }).sessionsTabHidden(), true);
+  assert.equal(openPage([D(TODAY, 1)]).sessionsTabHidden(), true);
+  assert.equal(openPage([D(TODAY, 1)], { sessions: SESSIONS() }).privacyButton().hidden, false, "names to hide: titles, branches");
+  assert.equal(openPage([D(TODAY, 1)]).privacyButton().hidden, true);
+});
+
+test("Sessions tab: one row per session, the most recently active first, with its title (or a short id), cost, time and rate; the Total adds the costs but not the time", () => {
+  const p = sessionsPage();
+  assert.equal(p.header(), "Session");
+  assert.deepEqual(labels(p), ["Total", "Fix login", "(untitled) bbbbbbbb", "Docs"], "newest first: 10-08, 10-07, 09-20 — not by cost");
+  assert.deepEqual(costs(p), ["$16.00", "$8.00", "$3.00", "$5.00"]);
+  const t = p.tableRows();
+  assert.deepEqual(t.map(r => r.nums.slice(5)), [["—", "—"], ["1h", "$8.00/h"], ["—", "—"], ["2h", "$2.50/h"]], "sessions overlap in time: no total; a session without measured time shows —");
+  assert.deepEqual(t.map(r => r.last), ["2026-10-08", "2026-10-08", "2026-10-07", "2026-09-20"], "last activity, descending; the Total shows the latest");
+  assert.equal(t[1].title, "~/ok/app · feature/login · aaaaaaaa · acme/web#12", "hover: project, branches, id, pull requests");
+  assert.equal(t[2].title, "~/ok/lib · main · bbbbbbbb");
+  assert.equal(p.rangeHidden(), false);
+  assert.equal(p.lastHeaderHidden(), false);
+  assert.equal(p.yearHidden(), true);
+});
+
+test("Sessions tab: the period chips use the day of a session's LAST message and count the whole session", () => {
+  const p = sessionsPage();
+  p.clickRange("7d");
+  assert.deepEqual(labels(p), ["Total", "Fix login", "(untitled) bbbbbbbb"], "the September session is out");
+  assert.equal(costs(p)[0], "$11.00");
+  assert.equal(p.header(), "Session", "a chip on this tab re-renders this tab, not Projects");
+  p.clickRange("1d");
+  assert.deepEqual(labels(p), ["Total", "Fix login"]);
+  p.clickRange("30d");
+  assert.deepEqual(labels(p), ["Total", "Fix login", "(untitled) bbbbbbbb", "Docs"], "09-20 is within 30 days of 10-08");
+  assert.equal(p.barTitle(), "Cost per session, last 30 days (by model)");
+  const none = sessionsPage([S("x", { t1: ms(8, 1) })]);
+  none.clickRange("1d");
+  assert.match(none.rows()[0].innerHTML, /No sessions in this period\./);
+  assert.match(none.rows()[0].innerHTML, /colspan="10"/, "all columns: 7 + Time + Rate + Last activity");
+  assert.deepEqual(none.cards().avg, ["Avg cost / session", "—"]);
+  assert.deepEqual(none.sessionStrip(), { count: "0", side: "—", think: "—" });
+});
+
+test("Sessions tab: no Session / Branch / PR switch — one row per session, the branch and the PR count are labels under the title", () => {
+  assert.doesNotMatch(TEMPLATE, /data-group=|id="group-by"|gchip/, "the switch is gone from the page");
+  const p = sessionsPage();
+  assert.deepEqual(p.tableRows().map(r => r.note), ["", "feature/login · 1 PR", "main", "feature/login +1 · 2 PRs"], "Fix login: one branch, one PR; the untitled one: main only; Docs: two branches, two PRs");
+  assert.deepEqual(labels(p), ["Total", "Fix login", "(untitled) bbbbbbbb", "Docs"], "the label itself is unchanged by the note");
+  const detached = sessionsPage([S("d", { title: "No branch", rows: [SR("HEAD", 3), SR("", 1)] })]);
+  assert.equal(detached.tableRows()[1].note, "", "HEAD (nothing checked out) and an empty branch are not branches: no label");
+  assert.equal(detached.tableRows()[1].title, "~/ok/app · (detached HEAD) · d", "but the hover still says so (an empty branch is simply left out)");
+  assert.equal(sessionsPage([S("one", { rows: [SR("solo", 1)] })]).cards().avg[0], "Avg cost / session · 1 session", "singular");
+});
+
+test("Sessions tab: a session that linked many pull requests is still ONE row and its cost counts once (no PR grouping to multiply it)", () => {
+  const prs = Array.from({ length: 23 }, (_, i) => ["acme/web", 100 + i]);
+  const p = sessionsPage([S("big", { title: "Release train", prs, rows: [SR("main", 171)] }), S("small", { title: "Small", rows: [SR("main", 4)] })]);
+  assert.deepEqual(costs(p), ["$175.00", "$171.00", "$4.00"], "$171 once, not 23 times");
+  assert.equal(p.tableRows()[1].note, "main · 23 PRs");
+  assert.match(p.tableRows()[1].title, /acme\/web#100, acme\/web#101/, "the hover lists them");
+  assert.equal(sessionsPage([S("one", { prs: [["a/b", 1]] })]).tableRows()[1].note, "main · 1 PR", "singular");
+});
+
+test("Sessions tab: cards, chart and average line; the chart shows the 12 biggest rows and says so, with no summed '+N more' bar", () => {
+  const p = sessionsPage();
+  assert.deepEqual(p.cards().min, ["Min cost / session · (untitled) bbbbbbbb", "$3.00"]);
+  assert.deepEqual(p.cards().avg, ["Avg cost / session · 3 sessions", "$5.33"]);
+  assert.deepEqual(p.cards().max, ["Max cost / session · Fix login", "$8.00"]);
+  assert.deepEqual([...p.bar().data.labels], ["Fix login", "Docs", "(untitled) bbbbbbbb"]);
+  assert.equal(p.barConfig().options.plugins.avgLine.value, 16 / 3);
+  assert.equal(p.barTitle(), "Cost per session, all time (by model)", "nothing is cut: no remark");
+  const many = sessionsPage(Array.from({ length: 14 }, (_, i) => S(`s${String(i).padStart(2, "0")}`, { title: `T${i}`, rows: [SR("main", 100 - i)] })));
+  assert.deepEqual([...many.bar().data.labels], Array.from({ length: 12 }, (_, i) => `T${i}`), "the twelve biggest, in order, and no merged bar");
+  assert.equal(many.barTitle(), "Cost per session, all time — the 12 biggest of 14 (by model)");
+  const exactly = sessionsPage(Array.from({ length: 12 }, (_, i) => S(`e${i}`, { title: `E${i}`, rows: [SR("main", 50 - i)] })));
+  assert.equal(exactly.barTitle(), "Cost per session, all time (by model)", "twelve rows all fit: no remark");
+  assert.equal([...exactly.bar().data.labels].length, 12);
+  assert.equal(many.cards().avg[0], "Avg cost / session · 14 sessions", "the cards still cover every row");
+  assert.equal(many.barConfig().options.plugins.avgLine.value, (100 + 99 + 98 + 97 + 96 + 95 + 94 + 93 + 92 + 91 + 90 + 89 + 88 + 87) / 14, "so does the average line");
+  assert.equal(many.tableRows().length, 15, "and the table lists all of them (Total + 14)");
+  const doughnut = p.doughnut().data;
+  assert.deepEqual(Object.fromEntries(doughnut.labels.map((l, i) => [l, doughnut.datasets[0].data[i]])), { "sonnet-5": 13, "opus-5": 3 }, "cost share by model over the period's sessions");
+});
+
+test("Sessions tab: strip with the number of sessions, the subagent share of the cost and the thinking share of the output; the cache strip counts the sessions too", () => {
+  const p = sessionsPage();
+  assert.deepEqual(p.sessionStrip(), { count: "3", side: "12.5%", think: "24.9%" }, "2 of 16 dollars by a subagent; 553 of 2223 output tokens were thinking");
+  assert.equal(p.sessionStripHidden(), false);
+  assert.deepEqual(p.cache(), { rate: "50.0%", served: "4.4k", saved: "$1.60" });
+  p.clickRange("1d");
+  assert.deepEqual(p.sessionStrip(), { count: "1", side: "25.0%", think: "25.0%" }, "A alone: subagent $2 of $8; 550 of 2200");
+  p.clickTab("daily");
+  assert.equal(p.sessionStripHidden(), true);
+  assert.equal(p.rangeHidden(), true);
+  p.clickTab("sessions");
+  assert.equal(p.sessionStripHidden(), false);
+});
+
+test("Sessions tab: without active time the Time and Rate columns are not there", () => {
+  const p = openPage([D(TODAY, 1)], { sessions: SESSIONS() });
+  p.clickTab("sessions");
+  assert.deepEqual(p.tableRows()[1].nums.length, 5, "cost + four token columns");
+  assert.equal(p.timeHeaderHidden(), true);
+});
+
+test("Privacy: titles, branches and pull request repositories are masked on the Sessions tab (in the title, the note and the hover); the structure and the numbers stay", () => {
+  const p = sessionsPage();
+  p.clickPrivacy();
+  const secrets = ["Fix login", "Docs", "acme", "feature/login", "ok/app", "ok/lib"];
+  const everything = () => JSON.stringify([p.tableRows().map(r => r.html), p.bar().data.labels, p.barConfig().options.plugins.tooltip.callbacks.title([0, 1, 2].map(i => ({ dataIndex: i, label: "x" }))), p.cards()]);
+  for (const w of secrets) assert.ok(!everything().includes(w), `${w} is visible`);
+  assert.deepEqual(labels(p), ["Total", "****", "(untitled) bbbbbbbb", "****"], "an untitled session has nothing to hide");
+  assert.deepEqual(costs(p), ["$16.00", "$8.00", "$3.00", "$5.00"]);
+  assert.equal(p.tableRows()[1].title, "~/****/**** · **** · aaaaaaaa · ****#12");
+  assert.deepEqual(p.tableRows().map(r => r.note), ["", "**** · 1 PR", "****", "**** +1 · 2 PRs"], "the branch is hidden, how many PRs there are is not");
+  p.clickPrivacy();
+  assert.deepEqual([labels(p)[1], labels(p)[3]], ["Fix login", "Docs"], "the open eye brings the titles back");
+  assert.equal(p.tableRows()[1].note, "feature/login · 1 PR");
+  assert.equal(p.tableRows()[1].title, "~/ok/app · feature/login · aaaaaaaa · acme/web#12");
+});
+
+// ---- the divider between the time tabs and the Projects / Sessions tabs ---------------------------------------------
+test("Tabs: a divider sits between Monthly and Projects — time views on the left, views by what the money went to on the right", () => {
+  const order = [...TEMPLATE.matchAll(/<button class="tab[^"]*"[^>]*data-view="(\w+)"|<span class="tab-sep"/g)].map(m => m[1] ?? "|");
+  assert.deepEqual(order, ["today", "daily", "weekly", "monthly", "|", "projects", "sessions"]);
+  assert.match(TEMPLATE, /<span class="tab-sep" id="tab-sep" aria-hidden="true">/, "decoration only: hidden from assistive technology, not a tab");
+  assert.match(TEMPLATE, /\.tab-sep \{[^}]*width: 1px;[^}]*background: var\(--border\)/);
+});
+
+test("Tabs: the divider is shown when Projects or Sessions exists and hidden when neither does", () => {
+  assert.equal(openPage([D(TODAY, 1)], { projects: [P(TODAY, "~/ok/a", "claude-sonnet-5", 1)] }).tabSepHidden(), false, "Projects only");
+  assert.equal(openPage([D(TODAY, 1)], { sessions: SESSIONS() }).tabSepHidden(), false, "Sessions only");
+  assert.equal(openPage([D(TODAY, 1)], { projects: [P(TODAY, "~/ok/a", "claude-sonnet-5", 1)], sessions: SESSIONS() }).tabSepHidden(), false);
+  assert.equal(openPage([D(TODAY, 1)]).tabSepHidden(), true, "nothing to the right of it");
+  assert.equal(openPage([D(TODAY, 1)], { sessions: [] }).tabSepHidden(), true, "an empty sessions list is no tab");
+});
+
+test("Average line: the label is the plain word 'Avg' plus the amount on EVERY tab — never 'Avg / project', 'Avg / session' or the like", () => {
+  const draw = p => {
+    const cfg = p.barConfig();
+    const texts = [];
+    const ctx = { save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, setLineDash() {}, fillText: t => texts.push(t) };
+    cfg.plugins[0].afterDatasetsDraw({ ctx, chartArea: { left: 0, right: 100, top: 0, bottom: 100 }, scales: { y: { getPixelForValue: () => 50 } } }, {}, cfg.options.plugins.avgLine);
+    return { texts, options: cfg.options.plugins.avgLine };
+  };
+  const cases = {
+    daily: () => { const p = openPage(AVG_ROWS); p.show("daily"); return p; },
+    "today (days)": () => { const p = openPage(AVG_ROWS); p.show("today"); return p; },
+    "today by project": () => { const p = openPage([D(TODAY, 6)], { projects: [P(TODAY, "~/ok/a", "claude-sonnet-5", 6)] }); p.show("today"); return p; },
+    projects: () => { const p = openPage([D(TODAY, 6)], { projects: [PR(TODAY, "~/ok/a", 6), PR(TODAY, "~/ok/b", 2)] }); p.clickTab("projects"); return p; },
+    sessions: () => sessionsPage(),
+  };
+  for (const [name, make] of Object.entries(cases)) {
+    const { texts, options } = draw(make());
+    assert.equal(texts.length, 1, name);
+    assert.match(texts[0], /^Avg \$\d+\.\d\d$/, `${name}: "${texts[0]}"`);
+    assert.deepEqual(Object.keys(options), ["value"], `${name}: no per-tab label option is left`);
+  }
+});
+
+test("Sessions tab: the table is ordered by the moment of the last message (newest first, the time of day counts); the chart still shows the most expensive", () => {
+  const sessions = [
+    S("old-big", { title: "Old but expensive", t1: ms(10, 1, 9), rows: [SR("main", 90)] }),
+    S("new-small", { title: "New and cheap", t1: ms(10, 8, 15), rows: [SR("main", 1)] }),
+    S("same-day-early", { title: "Same day, earlier", t1: ms(10, 8, 9), rows: [SR("main", 50)] }),
+    S("same-day-late", { title: "Same day, later", t1: ms(10, 8, 14), rows: [SR("main", 2)] }),
+    S("tie-a", { title: "Tie A", t1: ms(10, 5, 12), rows: [SR("main", 5)] }),
+    S("tie-b", { title: "Tie B", t1: ms(10, 5, 12), rows: [SR("main", 7)] }),
+  ];
+  const p = sessionsPage(sessions);
+  assert.deepEqual(labels(p).slice(1), ["New and cheap", "Same day, later", "Same day, earlier", "Tie B", "Tie A", "Old but expensive"], "10-08 15:00, 14:00, 09:00, then the 10-05 tie (dearer first), then 10-01");
+  assert.deepEqual([...p.bar().data.labels], ["Old but expensive", "Same day, earlier", "Tie B", "Tie A", "Same day, later", "New and cheap"], "the chart: by cost");
+  p.clickRange("7d");
+  assert.deepEqual(labels(p).slice(1), ["New and cheap", "Same day, later", "Same day, earlier", "Tie B", "Tie A"], "the order survives a period change");
+  p.clickPrivacy();
+  assert.deepEqual(p.tableRows().slice(1).map(r => r.last), ["2026-10-08", "2026-10-08", "2026-10-08", "2026-10-05", "2026-10-05"], "and masking titles does not reorder anything");
+});
+
+// ---- several AI tools (agents): heading, drop-down, switching ------------------------------------------------------
+const ALL_CAPS = { cache: true, time: true, projects: true, sessions: true, subagents: true, thinking: true };
+const NO_CAPS = { cache: true, time: false, projects: false, sessions: false, subagents: false, thinking: false };
+const CLAUDE = { id: "claude", label: "Claude Code", capabilities: ALL_CAPS };
+const GEMINI = { id: "gemini", label: "Google Gemini", capabilities: NO_CAPS };
+// the data of an agent that sits under `more`: periods built the way build.mjs does
+const moreOf = (rows, extra = {}) => { const periods = buildPeriods(normalizeDaily({ daily: rows }), { weekStart: "monday" }); return { daily: periods.daily, weekly: periods.weekly, monthly: periods.monthly, projects: null, time: null, sessions: null, ...extra }; };
+const twoAgents = (opts = {}) => openPage([D(TODAY, 10)], {
+  projects: [P(TODAY, "~/ok/a", "claude-sonnet-5", 10)], sessions: SESSIONS(), time: withTime([[TODAY, 3600]]),
+  agents: [CLAUDE, GEMINI], more: { gemini: moreOf([D("2025-12-30", 70), D(TODAY, 7)]) }, ...opts,
+});
+
+test("Agents: the heading is '<tool> AI Usage Dashboard' and the drop-down is hidden while there is one tool", () => {
+  const p = openPage([D(TODAY, 1)]);
+  assert.deepEqual(p.heading(), { h1: "Claude Code AI Usage Dashboard", title: "Claude Code AI Usage Dashboard" }, "a payload without an agent list still says which tool it is");
+  assert.equal(p.agentSelect().hidden, true);
+  const gem = openPage([D(TODAY, 1)], { agents: [GEMINI] });
+  assert.equal(gem.heading().h1, "Google Gemini AI Usage Dashboard");
+  assert.equal(gem.agentSelect().hidden, true);
+  assert.doesNotMatch(TEMPLATE, /__USER_NAME__/);
+  assert.match(TEMPLATE, /<h1 id="page-title">AI Usage Dashboard<\/h1>/, "the static text, before the script names the tool");
+});
+
+test("Agents: with several tools the drop-down lists them in order and switching changes the heading, the numbers and the chart", () => {
+  const p = twoAgents();
+  assert.deepEqual(p.agentSelect(), { hidden: false, value: "claude", options: [["claude", "Claude Code"], ["gemini", "Google Gemini"]] });
+  assert.equal(p.heading().h1, "Claude Code AI Usage Dashboard");
+  p.clickTab("daily");
+  assert.equal(p.totalCost(), "$10.00");
+  p.chooseAgent("gemini");
+  assert.deepEqual(p.heading(), { h1: "Google Gemini AI Usage Dashboard", title: "Google Gemini AI Usage Dashboard" });
+  assert.equal(p.agentSelect().value, "gemini");
+  assert.equal(p.totalCost(), "$7.00", "Gemini's daily total (2026 only: the year filter follows the data)");
+  assert.deepEqual(p.cards().max, ["Max cost / day · 2026-10-08", "$7.00"]);
+  assert.deepEqual([...p.bar().data.labels], ["2026-10-08"]);
+  p.chooseAgent("claude");
+  assert.equal(p.totalCost(), "$10.00");
+  assert.equal(p.heading().h1, "Claude Code AI Usage Dashboard");
+});
+
+test("Agents: the years follow the agent on screen", () => {
+  const p = twoAgents();
+  p.clickTab("daily");
+  assert.deepEqual(p.yearOptions().map(o => o.year), ["2026"]);
+  p.chooseAgent("gemini");
+  assert.deepEqual(p.yearOptions().map(o => o.year), ["2026", "2025"], "Gemini has December 2025 as well");
+  assert.deepEqual(p.yearOptions().find(o => o.selected).year, "2026", "the current year is chosen again");
+  p.selectYear(2025);
+  assert.equal(p.totalCost(), "$70.00");
+  p.chooseAgent("claude");
+  assert.deepEqual(p.yearOptions().map(o => o.year), ["2026"]);
+  assert.equal(p.totalCost(), "$10.00", "the year of the other tool does not stick");
+});
+
+test("Agents: tabs the tool cannot fill are hidden, and the one on screen falls back to Today", () => {
+  const p = twoAgents();
+  assert.deepEqual(p.tabsHidden(), { projects: false, sessions: false, sep: false });
+  p.clickTab("sessions");
+  assert.equal(p.activeTab(), "sessions");
+  p.chooseAgent("gemini");
+  assert.deepEqual(p.tabsHidden(), { projects: true, sessions: true, sep: true }, "no Projects, no Sessions, so no divider either");
+  assert.equal(p.activeTab(), "today", "the Sessions tab it was on is gone");
+  assert.equal(p.barTitle(), "Cost per today (by model)", "Today shows the plain period layout (Gemini has no projects), not 'per project'");
+  p.chooseAgent("claude");
+  assert.deepEqual(p.tabsHidden(), { projects: false, sessions: false, sep: false }, "and they come back");
+  p.clickTab("projects");
+  p.chooseAgent("gemini");
+  assert.equal(p.activeTab(), "today");
+  p.chooseAgent("claude");
+  assert.equal(p.activeTab(), "today", "it does not jump back by itself");
+});
+
+test("Agents: Time and Rate columns, the eye and the project layout follow the tool's own data", () => {
+  const p = twoAgents();
+  p.clickTab("daily");
+  assert.equal(p.timeHeaderHidden(), false);
+  assert.equal(p.privacyButton().hidden, false);
+  p.chooseAgent("gemini");
+  assert.equal(p.timeHeaderHidden(), true, "Gemini has no time");
+  assert.equal(p.rateHeaderHidden(), true);
+  assert.equal(p.privacyButton().hidden, true, "nothing to hide: no project names, no sessions");
+  assert.deepEqual(p.timeCells().filter(c => c !== undefined), []);
+  p.chooseAgent("claude");
+  assert.equal(p.timeHeaderHidden(), false);
+  assert.equal(p.privacyButton().hidden, false);
+});
+
+test("Agents: capabilities the tool does not have are not shown as if they were zero", () => {
+  const caps = { cache: false, time: true, projects: true, sessions: true, subagents: false, thinking: false };
+  const p = openPage([D(TODAY, 1)], { sessions: SESSIONS(), agents: [{ ...CLAUDE, id: "other", label: "Other Tool", capabilities: caps }] });
+  assert.equal(p.cacheStripHidden(), true, "no cache tokens → no cache panel");
+  p.clickTab("sessions");
+  assert.deepEqual(p.sessionStrip(), { count: "3", side: "—", think: "—" }, "no subagents or thinking to report on");
+  const full = openPage([D(TODAY, 1)], { sessions: SESSIONS(), agents: [CLAUDE] });
+  assert.equal(full.cacheStripHidden(), false);
+  full.clickTab("sessions");
+  assert.equal(full.sessionStrip().side, "12.5%");
+  const legacy = openPage([D(TODAY, 1)], { sessions: SESSIONS() }); // payload from before agents: nothing is denied
+  legacy.clickTab("sessions");
+  assert.equal(legacy.sessionStrip().think, "24.9%");
+  assert.equal(legacy.cacheStripHidden(), false);
+});
+
+test("Agents: the privacy eye keeps working after a switch, and a switch does not lose the choice", () => {
+  const p = twoAgents();
+  p.clickTab("sessions");
+  p.clickPrivacy();
+  p.chooseAgent("gemini");
+  p.chooseAgent("claude");
+  p.clickTab("sessions");
+  assert.equal(p.privacyButton().on, true);
+  assert.deepEqual(labels(p).slice(1, 2), ["****"], "titles are still masked");
+});
+
+test("Agents: a switch starts the other tool with a clean folder tree (what was opened or closed belongs to the first tool)", () => {
+  const rows = [PR(TODAY, "~/ok/code/a", 6), PR(TODAY, "~/ok/code/b", 4), PR(TODAY, "~/ok/lib", 1)];
+  const p = openPage([D(TODAY, 11)], { projects: rows, agents: [CLAUDE, GEMINI], more: { gemini: moreOf([D(TODAY, 3)]) } });
+  p.clickTab("projects");
+  const before = p.tree().map(r => r.label);
+  assert.deepEqual(before, ["~/ok", "code", "a", "b", "lib"]);
+  p.clickRow("code");
+  assert.deepEqual(p.tree().map(r => r.label), ["~/ok", "code", "lib"], "closing `code` hid its two children");
+  p.chooseAgent("gemini");
+  p.chooseAgent("claude");
+  p.clickTab("projects");
+  assert.deepEqual(p.tree().map(r => r.label), before, "back at the default layout");
+});
+
+test("Agents: the line under the heading names the tool on screen", () => {
+  const p = twoAgents();
+  assert.match(p.subText(), /^Generated at .* · data from local Claude Code logs$/);
+  p.chooseAgent("gemini");
+  assert.match(p.subText(), /^Generated at .* · data from local Google Gemini logs$/);
+  p.chooseAgent("claude");
+  assert.match(p.subText(), /data from local Claude Code logs/);
+});
+
+// ---- printing ------------------------------------------------------------------------------------------------------
+const lightTick = "#6b7280", darkTick = "#8a93a3";
+const tickColor = p => p.barConfig().options.scales.x.ticks.color;
+
+test("Print: the button calls window.print(), and nothing else happens on screen", () => {
+  const p = openPage(AVG_ROWS);
+  p.show("daily");
+  p.clickPrintButton();
+  assert.equal(p.printCalls(), 1);
+  assert.equal(p.printStyle(), null, "the page-header style is added by beforeprint, not by the click");
+  assert.match(TEMPLATE, /<div class="header-actions">[\s\S]*id="print-btn"[\s\S]*id="theme-toggle"/, "the button sits with the other header buttons (all hidden on paper)");
+});
+
+test("Print: beforeprint redraws in the light palette without animation and stamps the page; afterprint puts everything back", () => {
+  const stored = {};
+  const p = openPage(AVG_ROWS, { storage: stored });
+  p.clickTab("daily");
+  assert.equal(p.theme(), "dark");
+  assert.equal(tickColor(p), darkTick);
+  assert.equal(p.barConfig().options.animation, undefined, "the screen chart animates as before");
+  const writes = [];
+  const before = { ...stored };
+  p.firePrint("beforeprint");
+  assert.equal(p.theme(), "light", "paper is white");
+  assert.equal(tickColor(p), lightTick, "the canvas chart was drawn again with the light colours");
+  assert.equal(p.barConfig().options.animation, false, "and without animation: a half-drawn frame must not reach the paper");
+  assert.equal(p.doughnut().options.animation, false);
+  assert.deepEqual(stored, before, "the saved theme preference is not touched by printing");
+  p.firePrint("afterprint");
+  assert.equal(p.theme(), "dark", "back to what the user had");
+  assert.equal(tickColor(p), darkTick);
+  assert.equal(p.barConfig().options.animation, undefined);
+  assert.equal(p.printStyle(), null, "the page-header style is removed");
+  assert.deepEqual(stored, before);
+  assert.deepEqual(writes, []);
+});
+
+test("Print: a user who had the light theme keeps it; the choice made before printing is what comes back", () => {
+  const p = openPage(AVG_ROWS, { storage: { "ai-usage-cost-theme": "light" } });
+  p.clickTab("daily");
+  p.firePrint("beforeprint");
+  assert.equal(p.theme(), "light");
+  p.firePrint("afterprint");
+  assert.equal(p.theme(), "light");
+  p.clickTheme();
+  assert.equal(p.theme(), "dark", "and the toggle still works afterwards");
+});
+
+test("Print: the page header / footer text names the tool, the tab and its period; the version is in the footer", () => {
+  const p = openPage(AVG_ROWS, { agents: [{ ...CLAUDE, label: "Claude Code" }] });
+  p.clickTab("daily");
+  p.firePrint("beforeprint");
+  const css = p.printStyle();
+  assert.match(css, /^@media print \{ @page \{ @top-left \{ content: "Claude Code AI Usage Dashboard · Daily · year 2026";/);
+  assert.match(css, /@bottom-left \{ content: "npmjs\.com\/package\/ai-usage-cost";/, "no version in this payload: just the address people can install from");
+  p.firePrint("afterprint");
+  const versioned = openPage(AVG_ROWS, { version: "1.3.0" });
+  versioned.clickTab("daily");
+  versioned.firePrint("beforeprint");
+  assert.match(versioned.printStyle(), /@top-left \{ content: "Claude Code AI Usage Dashboard/);
+  assert.match(versioned.printStyle(), /@bottom-left \{ content: "npmjs\.com\/package\/ai-usage-cost · v1\.3\.0";/, "the npm address and the version are in the footer of every page");
+  p.firePrint("beforeprint");
+  p.firePrint("beforeprint");
+  assert.equal((p.printStyle().match(/@top-left/g) ?? []).length, 1, "printing twice does not stack the style");
+});
+
+test("Print: text that goes into the CSS content string is escaped (a quote or a backslash cannot break out)", () => {
+  const nasty = { ...CLAUDE, label: 'Evil "tool" \\ \n</style>' };
+  const p = openPage(AVG_ROWS, { agents: [nasty] });
+  p.clickTab("daily");
+  p.firePrint("beforeprint");
+  const css = p.printStyle();
+  assert.ok(css.includes('content: "Evil \\"tool\\" \\\\  </style> AI Usage Dashboard · Daily · year 2026"'), "quotes and backslashes escaped, the newline became a space: " + css.slice(0, 120));
+  assert.equal(css.split("\n").length, 1);
+});
+
+test("Print: the printed page says which tab and which period it shows (the controls that carry them are not printed)", () => {
+  const rows = [PR(TODAY, "~/ok/a", 6)];
+  const p = openPage([D(TODAY, 6), D("2025-12-30", 2)], { projects: rows, sessions: SESSIONS() });
+  p.show("today");
+  assert.equal(p.printContext(), "Today · 2026-10-08");
+  p.clickTab("daily");
+  assert.equal(p.printContext(), "Daily · year 2026");
+  p.selectYear(2025);
+  assert.equal(p.printContext(), "Daily · year 2025");
+  p.clickTab("weekly");
+  assert.equal(p.printContext(), "Weekly · year 2025");
+  p.clickTab("monthly");
+  assert.equal(p.printContext(), "Monthly · year 2025");
+  p.clickTab("projects");
+  assert.equal(p.printContext(), "Projects · all time");
+  p.clickRange("30d");
+  assert.equal(p.printContext(), "Projects · last 30 days");
+  p.clickTab("sessions");
+  assert.equal(p.printContext(), "Sessions · last 30 days", "the chip is shared with Projects");
+  p.clickRange("1d");
+  assert.equal(p.printContext(), "Sessions · today");
+});
+
+test("Print: what is printed is the tab on screen, in the state on screen — privacy mode, agent, period", () => {
+  const p = twoAgents();
+  p.clickTab("sessions");
+  p.clickRange("7d");
+  p.clickPrivacy();
+  p.firePrint("beforeprint");
+  assert.equal(p.printContext(), "Sessions · last 7 days");
+  assert.deepEqual(labels(p).slice(1, 2), ["****"], "titles are still masked on paper");
+  p.firePrint("afterprint");
+  assert.equal(p.activeTab(), "sessions");
+  p.chooseAgent("gemini");
+  p.firePrint("beforeprint");
+  assert.match(p.printStyle(), /content: "Google Gemini AI Usage Dashboard · Today · 2026-10-08"/, "the other tool, and the Today tab it fell back to");
+  p.firePrint("afterprint");
+});
+
+// ---- text that comes from a conversation or a git repository is never interpreted as HTML ------------------------------
+test("Escaping: session titles, branches, pull request repositories and tool names are text, not markup", () => {
+  const evil = '<img src=x onerror="alert(1)">';
+  const sessions = [S("evil-1", { title: evil, project: `~/ok/${evil}`, prs: [[evil, 7]], rows: [[evil, "claude-sonnet-5", 0, 1, 1, 1, 1, 0, 0, 1, 0]] })];
+  const p = openPage([D(TODAY, 1)], { sessions, agents: [{ ...CLAUDE, label: evil }], more: {} });
+  p.clickTab("sessions");
+  const html = p.tableRows().map(r => r.html).join("\n");
+  assert.ok(!html.includes("<img"), "no element was created from a title or a branch");
+  assert.ok(html.includes("&lt;img"), "it is shown as text");
+  assert.equal(p.tableRows()[1].title.includes("<"), false, "also inside the hover attribute");
+  assert.equal(p.tableRows()[1].title.includes('"'), false, "and a quote cannot close the attribute");
+  const entries = p.agentSelect().options;
+  assert.equal(entries.length, 1, "the entry exists (if it carried markup it would not even parse as an option)");
+  assert.ok(entries[0][1].startsWith("&lt;img"), "and shows the tool name as text");
+  p.clickPrivacy();
+  assert.ok(!p.tableRows().map(r => r.html).join("").includes("<img"));
 });

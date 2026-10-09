@@ -29,3 +29,9 @@ test("top models are shortened and ordered by cost", () => {
   const md = buildSummary(daily, now);
   assert.ok(md.indexOf("| opus-5 |") < md.indexOf("| sonnet-5 |"));
 });
+
+test("the heading names the tool the summary is about (Claude Code by default)", () => {
+  assert.match(buildSummary([], new Date(2026, 9, 8)), /^\n## Claude Code usage — quick summary\n/);
+  assert.match(buildSummary([], new Date(2026, 9, 8), { label: "Google Gemini" }), /\n## Google Gemini usage — quick summary\n/);
+  assert.doesNotMatch(buildSummary([], new Date(2026, 9, 8)), /Claude Usage/);
+});

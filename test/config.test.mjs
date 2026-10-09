@@ -12,7 +12,7 @@ const write = obj => {
 };
 
 test("defaults when the file is absent; user values merge over them", () => {
-  assert.deepEqual(loadConfig("/nonexistent"), { weekStart: "auto", source: "auto", prices: {}, priceRefresh: "daily", priceUrl: null, history: "on", projects: "on", time: "on", idleMinutes: 10 });
+  assert.deepEqual(loadConfig("/nonexistent"), { weekStart: "auto", source: "auto", agents: "auto", prices: {}, priceRefresh: "daily", priceUrl: null, history: "on", projects: "on", time: "on", sessions: "on", sessionTitles: "on", idleMinutes: 10 });
   assert.equal(loadConfig(write({ source: "ccusage" })).source, "ccusage");
 });
 
@@ -32,4 +32,11 @@ test("rejects bad source, bad prices and malformed JSON with a message that name
   assert.equal(loadConfig(write({ priceRefresh: "off", priceUrl: "https://mirror.example/prices.json" })).priceRefresh, "off");
   assert.throws(() => loadConfig(write("{nope")), /not valid JSON/);
   assert.doesNotThrow(() => loadConfig(write({ prices: { m: { input: 1, output: 2, cacheWrite: 3, cacheRead: 4 } } })));
+});
+
+test("sessions and sessionTitles accept only on / off", () => {
+  assert.equal(loadConfig(write({ sessions: "off" })).sessions, "off");
+  assert.equal(loadConfig(write({ sessionTitles: "off" })).sessionTitles, "off");
+  assert.throws(() => loadConfig(write({ sessions: "yes" })), /"sessions" must be "on" or "off"/);
+  assert.throws(() => loadConfig(write({ sessionTitles: true })), /"sessionTitles" must be "on" or "off"/);
 });

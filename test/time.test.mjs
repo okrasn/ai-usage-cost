@@ -18,8 +18,9 @@ test("active time: gaps up to the idle threshold count, longer gaps are time awa
   assert.equal(total(activeTime([[ev(0), ev(10)]], 10).all), 10 * 60, "a gap equal to the threshold counts");
   assert.equal(total(activeTime([[ev(0), ev(11)]], 10).all), 0, "one minute over does not");
   assert.equal(total(activeTime([[ev(0), ev(11)]], 15).all), 11 * 60, "the threshold is configurable");
-  assert.deepEqual(activeTime([[ev(0)]], 10), { projects: [], all: [] }, "a single event has no duration");
-  assert.deepEqual(activeTime([], 10), { projects: [], all: [] });
+  for (const none of [activeTime([[ev(0)]], 10), activeTime([], 10)]) {
+    assert.deepEqual([none.projects, none.all, none.sessions.size], [[], [], 0], "a single event (or none) has no duration");
+  }
 });
 
 test("parallel sessions in one project count once; in two projects each counts it, but the overall total counts it once", () => {
@@ -84,8 +85,8 @@ test("two transcript files that overlap (a session and its sub-agent) are united
 });
 
 test("history: time is kept with a per-field maximum, survives a save/load, and older schemas load with no time", () => {
-  const ledger = { projects: [{ t: 1, project: "~/a", seconds: 600 }], all: [{ t: 1, seconds: 600 }] };
-  const fresh = { projects: [{ t: 1, project: "~/a", seconds: 400 }, { t: 2, project: "~/a", seconds: 100 }], all: [{ t: 1, seconds: 500 }, { t: 2, seconds: 100 }] };
+  const ledger = { projects: [{ t: 1, project: "~/a", seconds: 600, agent: "claude" }], all: [{ t: 1, seconds: 600, agent: "claude" }] };
+  const fresh = { projects: [{ t: 1, project: "~/a", seconds: 400, agent: "claude" }, { t: 2, project: "~/a", seconds: 100, agent: "claude" }], all: [{ t: 1, seconds: 500, agent: "claude" }, { t: 2, seconds: 100, agent: "claude" }] };
   const m = mergeTime(ledger, fresh);
   assert.equal(m.changed, true);
   assert.deepEqual(m.time.projects.map(r => [r.t, r.seconds]), [[1, 600], [2, 100]], "bucket 1 keeps the larger value (the logs were partly cleaned up)");

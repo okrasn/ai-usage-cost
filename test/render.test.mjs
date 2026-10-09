@@ -9,21 +9,20 @@ test("embedded JSON cannot terminate the script block", () => {
   assert.deepEqual(JSON.parse(out).m, "</script><script>alert(1)</script>"); // still round-trips
 });
 
-test("user name is HTML-escaped in every placeholder", () => {
-  const html = renderHtml("<title>__USER_NAME__</title><h1>__USER_NAME__</h1>", {}, `<img src=x onerror="1">`);
-  assert.ok(!html.includes("<img"));
-  assert.equal((html.match(/&lt;img/g) ?? []).length, 2);
+test("only __DATA__ and __CHARTJS__ are placeholders: the user name is gone from the page and nothing else is substituted", () => {
+  const html = renderHtml("<h1>AI Usage Dashboard</h1> __USER_NAME__ __DATA__", { a: 1 });
+  assert.equal(html, '<h1>AI Usage Dashboard</h1> __USER_NAME__ {"a":1}', "a leftover __USER_NAME__ stays as text; nobody supplies a name any more");
 });
 
 test("inserted content is not re-scanned for placeholders", () => {
-  const html = renderHtml("A __USER_NAME__ B __DATA__", { note: "__USER_NAME__" }, "__DATA__");
+  const html = renderHtml("A __CHARTJS__ B __DATA__", { note: "__CHARTJS__" }, "__DATA__");
   assert.ok(html.startsWith("A __DATA__ B "));
-  assert.ok(html.includes('"note":"__USER_NAME__"'));
+  assert.ok(html.includes('"note":"__CHARTJS__"'));
 });
 
 test("inlined library source keeps </script and $-patterns intact", () => {
   const lib = 'var a="</script><b>";var p="$&$1$`";';
-  const html = renderHtml("<script>__CHARTJS__</script>", {}, "u", lib);
+  const html = renderHtml("<script>__CHARTJS__</script>", {}, lib);
   assert.equal(html.match(/<\/script>/g).length, 1); // only the real closing tag
   assert.ok(html.includes('<\\/script><b>'));
   assert.ok(html.includes('"$&$1$`"')); // no special replacement-pattern expansion
