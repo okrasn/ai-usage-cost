@@ -7,7 +7,7 @@ import { loadHistory, mergeBuckets, saveHistory } from "../lib/history.mjs";
 import { bucketsToCells } from "../lib/logs.mjs";
 
 const tmp = () => join(mkdtempSync(join(tmpdir(), "ccud-hist-")), "history.json");
-const b = (t, model, input = 1, output = 2, cacheCreation = 3, cacheRead = 4, cost = null) => ({ t, model, input, output, cacheCreation, cacheRead, cost });
+const b = (t, model, input = 1, output = 2, cacheCreation = 3, cacheRead = 4, cost = null, project = "") => ({ t, project, model, input, output, cacheCreation, cacheRead, cost });
 // 1 USD per million tokens of every kind keeps the arithmetic in the tests obvious
 const flat = rate => () => ({ input: rate, output: rate, cacheWrite: rate, cacheRead: rate });
 const Q = 900000;
@@ -24,8 +24,8 @@ test("save → load round-trips, with a compact model table and no text fields",
   const back = loadHistory(p);
   assert.equal(back.status, "ok");
   assert.deepEqual(back.buckets, data);
-  assert.deepEqual(Object.keys(raw).sort(), ["models", "note", "rows", "schema", "updatedAt"], "only counts, no content");
-  assert.deepEqual(raw.rows[0], [100, 0, 1, 2, 3, 4, 0.25], "the cost travels with the bucket");
+  assert.deepEqual(Object.keys(raw).sort(), ["models", "note", "projects", "rows", "schema", "timeAll", "timeProjects", "updatedAt"], "only counts and names, no content");
+  assert.deepEqual(raw.rows[0], [100, 0, 0, 1, 2, 3, 4, 0.25], "project index, model index, tokens, and the cost travels with the bucket");
   assert.deepEqual(raw.rows[1].at(-1), null, "no price known → null, not 0");
 });
 
@@ -99,7 +99,7 @@ test("a corrupt or unexpected file is moved aside, not overwritten or lost", () 
 
 test("a file from a NEWER version is readable but flagged, so callers never overwrite it", () => {
   const p = tmp();
-  writeFileSync(p, JSON.stringify({ schema: 99, models: ["a"], rows: [[1, 0, 1, 1, 1, 1, null]] }));
+  writeFileSync(p, JSON.stringify({ schema: 99, models: ["a"], projects: [""], rows: [[1, 0, 0, 1, 1, 1, 1, null]] }));
   const r = loadHistory(p, () => {});
   assert.equal(r.status, "newer");
   assert.equal(r.buckets.length, 1);
@@ -132,4 +132,40 @@ test("changing the time zone does not double-count anything (the reason for UTC 
   } finally {
     if (old === undefined) delete process.env.TZ; else process.env.TZ = old;
   }
+});
+
+test("project is part of the bucket identity: same time and model in two projects are two rows, merged per project", () => {
+  const a = b(5, "m", 10, 10, 10, 10, null, "~/a");
+  const c = b(5, "m", 7, 7, 7, 7, null, "~/c");
+  const first = mergeBuckets([], [a, c], flat(1));
+  assert.equal(first.buckets.length, 2);
+  const grown = mergeBuckets(first.buckets, [{ ...a, input: 20 }], flat(1));
+  assert.equal(grown.buckets.find(x => x.project === "~/a").input, 20);
+  assert.equal(grown.buckets.find(x => x.project === "~/c").input, 7, "the other project is untouched");
+});
+
+test("a schema 1 file (no projects) is read, flagged legacy and rewritten in the current schema", () => {
+  const p = tmp();
+  writeFileSync(p, JSON.stringify({ schema: 1, models: ["m"], rows: [[10, 0, 1, 2, 3, 4, 0.5]] }));
+  const r = loadHistory(p);
+  assert.equal(r.status, "ok");
+  assert.deepEqual(r.buckets, [{ t: 10, project: "", legacy: true, model: "m", input: 1, output: 2, cacheCreation: 3, cacheRead: 4, cost: 0.5 }]);
+  const merged = mergeBuckets(r.buckets, [], flat(1));
+  assert.equal(merged.changed, true, "a surviving legacy row must be written back in the new format");
+  assert.equal("legacy" in merged.buckets[0], false);
+  saveHistory(p, merged.buckets);
+  assert.equal(JSON.parse(readFileSync(p, "utf8")).schema, 3);
+  assert.equal(mergeBuckets(loadHistory(p).buckets, [], flat(1)).changed, false, "after the migration nothing is pending");
+});
+
+test("migration: a legacy row is replaced by project-attributed rows when the logs still cover it, and kept (as unattributed) when they do not", () => {
+  const legacy = [{ t: 1, project: "", legacy: true, model: "m", input: 30, output: 30, cacheCreation: 0, cacheRead: 0, cost: 99 },
+                  { t: 2, project: "", legacy: true, model: "m", input: 5, output: 5, cacheCreation: 0, cacheRead: 0, cost: 7 }];
+  const fresh = [b(1, "m", 10, 10, 0, 0, null, "~/a"), b(1, "m", 20, 20, 0, 0, null, "~/b")]; // bucket 1 is still in the logs, bucket 2 was cleaned up
+  const { buckets } = mergeBuckets(legacy, fresh, flat(1));
+  const tokens = buckets.filter(x => x.t === 1).reduce((s, x) => s + x.input, 0);
+  assert.equal(tokens, 30, "no double counting: the same 30 tokens, now split by project");
+  assert.deepEqual(buckets.filter(x => x.t === 1).map(x => x.project).sort(), ["~/a", "~/b"]);
+  const kept = buckets.find(x => x.t === 2);
+  assert.deepEqual([kept.project, kept.cost], ["", 7], "history that only the old file knew stays, with its recorded cost");
 });

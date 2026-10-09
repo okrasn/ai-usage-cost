@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { logRoots, readLogs } from "../lib/logs.mjs";
+import { bucketsToProjectCells, logRoots, projectOf, readLogs } from "../lib/logs.mjs";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "ccud-logs-"));
 // timestamps built from LOCAL time, so the expected date is the same in any time zone
@@ -83,4 +83,39 @@ test("buckets are 15-minute UTC slices per model; cells are their local-day sums
   assert.deepEqual(buckets.map(x => x.output).sort((p, q) => p - q), [30, 30]);
   assert.equal(cells.length, 1);
   assert.equal(cells[0].output, 60);
+});
+
+test("projectOf: the message's working directory relative to the home directory", () => {
+  assert.equal(projectOf("/Users/me/ok/app", "/Users/me"), "~/ok/app");
+  assert.equal(projectOf("/Users/me", "/Users/me"), "~");
+  assert.equal(projectOf("/Users/me/", "/Users/me"), "~");
+  assert.equal(projectOf("/Users/meow/app", "/Users/me"), "/Users/meow/app", "a sibling that merely shares the prefix is not under home");
+  assert.equal(projectOf("/srv/app/", "/Users/me"), "/srv/app");
+  assert.equal(projectOf("C:\\Users\\me\\app", "C:\\Users\\me"), "~\\app");
+  assert.equal(projectOf(undefined, "/Users/me"), "");
+  assert.equal(projectOf("", "/Users/me"), "");
+});
+
+test("buckets are per project: the same quarter-hour and model in two directories stay separate; cells still sum them", () => {
+  const e = (id, cwd, out) => entry({ requestId: id, cwd, message: { id, model: "claude-sonnet-5", usage: { input_tokens: 1, output_tokens: out, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } });
+  const root = project([e("a", "/Users/me/ok/app", 10), e("b", "/Users/me/ok/lib", 20), e("c", "/Users/me/ok/app", 5), e("d", undefined, 1)]);
+  const { buckets, cells } = readLogs({ roots: [root], home: "/Users/me" });
+  const byProject = Object.fromEntries(buckets.map(b => [b.project || "(none)", b.output]));
+  assert.deepEqual(byProject, { "~/ok/app": 15, "~/ok/lib": 20, "(none)": 1 });
+  assert.equal(cells.length, 1);
+  assert.equal(cells[0].output, 36, "the per-day cell is the sum over projects");
+});
+
+test("projects: false never records a path", () => {
+  const root = project([entry({ cwd: "/Users/me/secret-client", requestId: "z", message: { id: "z", model: "claude-sonnet-5", usage: { input_tokens: 3, output_tokens: 3 } } })]);
+  const { buckets } = readLogs({ roots: [root], projects: false, home: "/Users/me" });
+  assert.deepEqual(buckets.map(b => b.project), [""]);
+  assert.ok(!JSON.stringify(buckets).includes("secret-client"));
+});
+
+test("bucketsToProjectCells: day × project × model, costs summed, old days trimmed, null cost counts as 0", () => {
+  const q = (y, m, d, h) => Math.floor(new Date(y, m - 1, d, h).getTime() / 900000);
+  const b = (t, project, model, cost) => ({ t, project, model, input: 1, output: 1, cacheCreation: 1, cacheRead: 1, cost });
+  const rows = bucketsToProjectCells([b(q(2026, 10, 8, 9), "~/a", "m1", 1), b(q(2026, 10, 8, 10), "~/a", "m1", 2), b(q(2026, 10, 8, 10), "~/b", "m1", null), b(q(2026, 9, 1, 10), "~/a", "m1", 9)], "2026-09-09");
+  assert.deepEqual(rows.map(r => [r.date, r.project, r.model, r.cost, r.input]), [["2026-10-08", "~/a", "m1", 3, 2], ["2026-10-08", "~/b", "m1", 0, 1]]);
 });

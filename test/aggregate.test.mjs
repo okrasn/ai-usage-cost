@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildPeriods, localeFirstDay, resolveWeekStart, weekStartOf } from "../lib/aggregate.mjs";
+import { buildPeriods, localeFirstDay, resolveWeekStart, weekKeyWithinYear, weekStartOf } from "../lib/aggregate.mjs";
 import { normalizeDaily } from "../lib/normalize.mjs";
 import { classicRow } from "./helpers.mjs";
 
@@ -42,4 +42,30 @@ test("weekly and monthly rows are sums of the daily rows, per model", () => {
   assert.deepEqual(cost, { a: 1, b: 5 });
   assert.equal(p.weekly[0].totalCost, 3); // 09-30 + 10-01 fall in the week of 09-28
   assert.equal(p.weekStartDay, "monday");
+});
+
+test("a week that crosses New Year is split into two rows, one per year, so yearly totals agree across tabs", () => {
+  const daily = normalizeDaily({ daily: [classicRow("2025-12-29", 1), classicRow("2025-12-31", 2), classicRow("2026-01-01", 4), classicRow("2026-01-04", 8), classicRow("2026-01-05", 16)] });
+  const monday = buildPeriods(daily, { weekStart: "monday" });
+  assert.deepEqual(monday.weekly.map(w => [w.week, w.totalCost]), [["2025-12-29", 3], ["2026-01-01", 12], ["2026-01-05", 16]]);
+  const sunday = buildPeriods(daily, { weekStart: "sunday" });
+  // Sunday-start: the week of 2025-12-28 runs to 2026-01-03 (split at New Year); 2026-01-04 starts a new week
+  assert.deepEqual(sunday.weekly.map(w => [w.week, w.totalCost]), [["2025-12-28", 3], ["2026-01-01", 4], ["2026-01-04", 24]]);
+
+  for (const p of [monday, sunday]) {
+    for (const year of ["2025", "2026"]) {
+      const sum = rows => rows.filter(r => (r.week ?? r.month ?? r.date).startsWith(year)).reduce((s, r) => s + r.totalCost, 0);
+      assert.equal(sum(p.weekly), sum(p.daily), `${year}: weekly = daily`);
+      assert.equal(sum(p.monthly), sum(p.daily), `${year}: monthly = daily`);
+    }
+  }
+});
+
+test("weekKeyWithinYear leaves ordinary weeks alone and a week that starts on Jan 1 unsplit", () => {
+  assert.equal(weekKeyWithinYear("2026-10-08", 1), "2026-10-05");
+  assert.equal(weekKeyWithinYear("2026-01-01", 4), "2026-01-01"); // Thursday: the week starts on Jan 1 itself
+  assert.equal(weekKeyWithinYear("2026-01-03", 4), "2026-01-01");
+  assert.equal(weekKeyWithinYear("2026-01-01", 1), "2026-01-01"); // Thursday in a Monday-start week that began in 2025
+  assert.equal(weekKeyWithinYear("2025-12-31", 1), "2025-12-29");
+  assert.equal(weekKeyWithinYear("2024-02-29", 0), "2024-02-25"); // leap day, no split
 });

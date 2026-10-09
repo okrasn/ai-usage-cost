@@ -18,5 +18,13 @@ test("the four summary cards are gone and the breakdown table leads with a Total
   assert.ok(html.includes("tbody tr.total td"));
   assert.ok(html.includes('id="kpi-min"') && html.includes('id="kpi-avg"') && html.includes('id="kpi-max"'), "min / avg / max stay");
   // the Total row is inserted before the per-period rows
-  assert.ok(html.indexOf('tr.className = "total"') < html.indexOf("[...rows].reverse().forEach"));
+  assert.ok(html.indexOf('tr.className = "total"') < html.indexOf("(byProject ? rows : [...rows].reverse()).forEach"));
+});
+
+test("the hidden attribute really hides: a global [hidden] rule beats any author display (the period chips are display:flex)", () => {
+  assert.match(html, /\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}/);
+  // every element the page toggles with .hidden is covered by that rule — list them so a new one is noticed
+  const toggled = [...html.matchAll(/getElementById\("([^"]+)"\)\.hidden\b|\b(yearSelect|n)\.hidden\b/g)];
+  assert.ok(toggled.length >= 4);
+  assert.ok(html.includes('<div class="range" id="range-group" hidden>'), "the chips start hidden (Today is the first tab)");
 });

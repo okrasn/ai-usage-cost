@@ -52,8 +52,20 @@
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
   th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.nowrap, #th-last { white-space: nowrap; }
   tbody tr:hover { background: var(--panel-2); }
+  /* an author `display` (e.g. .range { display: flex }) would otherwise beat the browser's [hidden] { display: none } */
+  [hidden] { display: none !important; }
+  .range { display: flex; gap: 4px; }
+  .chip {
+    background: var(--panel); color: var(--muted); border: 1px solid var(--border);
+    padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 12px;
+  }
+  .chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  tbody tr.has-kids { cursor: pointer; }
+  .twisty { display: inline-block; width: 14px; margin-right: 4px; color: var(--muted); }
+  td.empty { color: var(--muted); text-align: center; padding: 18px 10px; }
   tbody tr.total td { font-weight: 600; }
   .footer {
     margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--border);
@@ -98,12 +110,23 @@
     transition: color .15s, border-color .15s;
   }
   .theme-toggle:hover { color: var(--text); border-color: var(--accent); }
+  .theme-toggle.on { color: var(--accent); border-color: var(--accent); }
+  .header-actions { display: flex; gap: 8px; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="header-row">
     <h1>__USER_NAME__ Claude Usage Dashboard</h1>
+    <div class="header-actions">
+    <button id="privacy-toggle" class="theme-toggle" aria-pressed="false" title="Hide project names" aria-label="Hide project names">
+      <svg id="icon-eye" xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+      </svg>
+      <svg id="icon-eye-off" xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>
+      </svg>
+    </button>
     <button id="theme-toggle" class="theme-toggle" title="Toggle theme" aria-label="Toggle theme">
       <svg id="icon-sun" xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
@@ -115,6 +138,7 @@
         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
       </svg>
     </button>
+    </div>
   </div>
   <div class="notice" id="notice" hidden></div>
   <div class="sub" id="sub"></div>
@@ -125,8 +149,17 @@
       <button class="tab" data-view="daily">Daily</button>
       <button class="tab" data-view="weekly">Weekly</button>
       <button class="tab" data-view="monthly">Monthly</button>
+      <button class="tab" id="tab-projects" data-view="projects">Projects</button>
     </div>
     <select id="year-select" class="year-select" title="Filter by year"></select>
+    <div class="range" id="range-group" hidden>
+      <button class="chip" data-range="1d">1d</button>
+      <button class="chip" data-range="7d">7d</button>
+      <button class="chip" data-range="30d">30d</button>
+      <button class="chip" data-range="90d">90d</button>
+      <button class="chip" data-range="1y">1y</button>
+      <button class="chip active" data-range="all">All</button>
+    </div>
   </div>
 
   <div class="kpis-stats">
@@ -147,17 +180,19 @@
   </div>
 
   <div class="card">
-    <h3>Breakdown</h3>
     <table id="tbl">
       <thead>
         <tr>
-          <th>Period</th>
+          <th id="th-first">Period</th>
           <th class="num">Cost ($)</th>
           <th class="num">Input</th>
           <th class="num">Output</th>
           <th class="num">Cache write</th>
           <th class="num">Cache read</th>
+          <th class="num" id="th-time" hidden>Time</th>
+          <th class="num" id="th-rate" hidden title="Cost per hour of active work (Cost ÷ Time)">Rate</th>
           <th>Models</th>
+          <th id="th-last" hidden>Last activity</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -176,7 +211,25 @@ const DATA = __DATA__;
 
 const COLORS = ["#d97757", "#5b9dd9", "#7ec27e", "#c084fc", "#f5b342", "#e87a90", "#4dd0e1", "#a3a3a3"];
 const fmtUsd = n => "$" + (n || 0).toFixed(2);
+// "2026-10-09 01:28:52 GMT+3": the moment of generation in the viewer's own time zone, offset spelled out (GMT+5:30, GMT)
+function fmtGenerated(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return String(iso);
+  const off = -d.getTimezoneOffset(), a = Math.abs(off);
+  const zone = "GMT" + (off === 0 ? "" : (off < 0 ? "-" : "+") + Math.floor(a / 60) + (a % 60 ? ":" + String(a % 60).padStart(2, "0") : ""));
+  return `${d.toLocaleDateString("sv-SE")} ${d.toLocaleTimeString("sv-SE")} ${zone}`;
+}
 const fmtNum = n => (n || 0).toLocaleString("en-US");
+// token counts in the table: 1.4B · 64M · 190k · 842 (the exact number is in the cell's tooltip)
+function fmtCompact(n) {
+  n = n || 0;
+  if (Math.abs(n) < 1000) return String(Math.round(n));
+  const units = ["k", "M", "B", "T"];
+  let v = n, i = -1;
+  do { v /= 1000; i++; } while (Math.abs(v) >= 999.5 && i < units.length - 1);
+  return (Math.abs(v) < 100 ? v.toFixed(1).replace(/\.0$/, "") : v.toFixed(0)) + units[i];
+}
+const tokenCell = n => `<td class="num" title="${fmtNum(n)}">${fmtCompact(n)}</td>`;
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const shortModel = m => m.replace(/^claude-/, "").replace(/-\d{8}$/, "");
 
@@ -256,6 +309,7 @@ function statRows(view, rows) {
   const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 29).toLocaleDateString("sv-SE");
   return (DATA.daily || []).filter(r => r.date >= start && r.date <= end);
 }
+// returns the average shown on the Avg card (null when there is nothing to average)
 function renderStats(view, rows) {
   const unit = STAT_UNIT[view];
   const key = KEY_BY_VIEW[view];
@@ -268,7 +322,7 @@ function renderStats(view, rows) {
     set("min", `Min cost / ${unit}`, "—");
     set("avg", `Avg cost / ${unit}`, "—");
     set("max", `Max cost / ${unit}`, "—");
-    return;
+    return null;
   }
   const cost = r => r.totalCost || 0;
   const lo = list.reduce((a, r) => (cost(r) < cost(a) ? r : a)); // ties: the earliest row
@@ -278,50 +332,120 @@ function renderStats(view, rows) {
   set("min", `Min cost / ${unit} · ${lo[key]}`, fmtUsd(cost(lo)));
   set("avg", `Avg cost / ${unit} · ${scope}`, fmtUsd(avg));
   set("max", `Max cost / ${unit} · ${hi[key]}`, fmtUsd(cost(hi)));
+  return avg;
 }
 
-function render(view) {
-  const rows = rowsForView(view);
-  const keyField = KEY_BY_VIEW[view];
+// ---- project rows -----------------------------------------------------------------------------------------
+// One row per project (working directory) from the DATA.projects rows that `keep` accepts, shaped like a period row so
+// the charts, the table and the Total row work unchanged. `lastDate` = the latest day with usage.
+// Privacy mode (the eye next to the theme toggle): every project name / path on screen — table, chart axis, tooltips,
+// cards — is replaced by **** per path segment ("~/ok/app" → "~/****/****"); the structure stays, the names do not.
+let privacy = false;
+const MASK = "****";
+const UNMASKED_LABEL = /^(\.\. \(this folder\)|~ \(home folder\)|\(unattributed\)|\+\d+ more)$/;
+function maskName(s) {
+  if (!privacy || UNMASKED_LABEL.test(s)) return s;
+  return s.replace(/[^\\/]+/g, seg => (seg === "~" || /^[A-Za-z]:$/.test(seg) ? seg : MASK));
+}
+const pathParts = path => path.split(/[\\/]/).filter(Boolean);
+const tail = (path, k) => (path === "" ? "(unattributed)" : pathParts(path).slice(-k).join("/") || path);
+function projectRows(keep) {
+  const byPath = new Map();
+  const measuredDays = HAS_TIME ? new Set(DATA.time.days.map(([d]) => d)) : new Set();
+  for (const p of DATA.projects) {
+    if (!keep(p)) continue;
+    let r = byPath.get(p.project);
+    if (!r) byPath.set(p.project, r = { path: p.project, totalCost: 0, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, lastDate: "", activeSeconds: null, timeCost: 0, models: new Map() });
+    r.totalCost += p.cost || 0;
+    if (HAS_TIME && measuredDays.has(p.date)) r.timeCost += p.cost || 0; // the rate counts only the cost of days whose time was measured
+    r.inputTokens += p.input || 0;
+    r.outputTokens += p.output || 0;
+    r.cacheCreationTokens += p.cacheCreation || 0;
+    r.cacheReadTokens += p.cacheRead || 0;
+    if (p.date > r.lastDate) r.lastDate = p.date;
+    r.models.set(p.model, (r.models.get(p.model) || 0) + (p.cost || 0));
+  }
+  if (HAS_TIME) { // active seconds per project over the same days; a project without any measured time stays null ("—")
+    for (const [date, project, seconds] of DATA.time.projects || []) {
+      const r = byPath.get(project);
+      if (r && keep({ date })) r.activeSeconds = (r.activeSeconds ?? 0) + seconds;
+    }
+  }
+  const rows = [...byPath.values()].map(r => {
+    const models = [...r.models.entries()].sort((a, b) => b[1] - a[1]);
+    const { models: _m, ...rest } = r;
+    return { ...rest, modelsUsed: models.map(([m]) => m), modelBreakdowns: models.map(([modelName, cost]) => ({ modelName, cost })) };
+  }).sort((a, b) => b.totalCost - a.totalCost || a.path.localeCompare(b.path));
+  // short names: the last two parts of the path ("ok/code"); a project whose name equals another's gets longer, the rest stay short
+  rows.forEach(r => {
+    const n = pathParts(r.path).length;
+    let k = 2;
+    while (k < n && rows.some(o => o !== r && tail(o.path, k) === tail(r.path, k))) k++;
+    r.label = tail(r.path, k);
+  });
+  return rows;
+}
+const todayRows = () => { const t = todayStr(); return projectRows(p => p.date === t); };
 
-  const totalCost = rows.reduce((s, r) => s + (r.totalCost || 0), 0);
+const AXIS_LABEL_MAX = 20;
+const clipLabel = s => (s.length > AXIS_LABEL_MAX ? s.slice(0, AXIS_LABEL_MAX - 1) + "…" : s);
 
-  renderStats(view, rows);
+// A red horizontal line over the bars at the value of the Avg card, so a bar can be read as above or below average.
+const AVG_LINE_COLOR = "#e5484d";
+const AVG_LINE_DASH = [6, 4];
+const avgLinePlugin = {
+  id: "avgLine",
+  afterDatasetsDraw(chart, _args, opts) {
+    if (!opts || opts.value == null) return;
+    const { ctx, chartArea, scales } = chart;
+    const y = scales.y.getPixelForValue(opts.value);
+    if (!(y >= chartArea.top && y <= chartArea.bottom)) return;
+    ctx.save();
+    ctx.strokeStyle = AVG_LINE_COLOR;
+    ctx.lineWidth = 1;
+    ctx.setLineDash(AVG_LINE_DASH); // dashed and thin: visible, but not shouting
+    ctx.beginPath();
+    ctx.moveTo(chartArea.left, y);
+    ctx.lineTo(chartArea.right, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = AVG_LINE_COLOR;
+    ctx.font = "500 9px system-ui, sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(`${opts.label || "Avg"} ${fmtUsd(opts.value)}`, chartArea.right - 4, y - 3);
+    ctx.restore();
+  },
+};
 
-  const allModels = [...new Set(rows.flatMap(r => (r.modelBreakdowns || []).map(b => b.modelName)))];
-  const labels = rows.map(r => r[keyField]);
-  const datasets = allModels.map(m => ({
-    label: shortModel(m),
-    backgroundColor: colorFor(m),
-    data: rows.map(r => {
-      const b = (r.modelBreakdowns || []).find(x => x.modelName === m);
-      return b ? +b.cost.toFixed(4) : 0;
-    }),
-  }));
-
-  const periodLabel = { today: "today", daily: "day", weekly: "week", monthly: "month" }[view] || view;
-  document.getElementById("bar-title").textContent = `Cost per ${periodLabel} (by model)`;
-
+// The two charts: a stacked bar (labels × models) and the doughnut (cost by model). `avg` (optional) draws the average line.
+function drawCharts({ labels, datasets, byModel, tooltipTitle, avg = null, avgLabel = "Avg" }) {
   const cc = chartColors();
   if (barChart) barChart.destroy();
   barChart = new Chart(document.getElementById("bar"), {
     type: "bar",
     data: { labels, datasets },
+    plugins: [avgLinePlugin],
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
+        avgLine: { value: avg, label: avgLabel },
         legend: { labels: { color: cc.legend, boxWidth: 12 } },
-        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmtUsd(c.parsed.y)}` } },
+        tooltip: { callbacks: {
+          title: tooltipTitle,
+          label: c => `${c.dataset.label}: ${fmtUsd(c.parsed.y)}`,
+        } },
       },
       scales: {
-        x: { stacked: true, ticks: { color: cc.ticks }, grid: { color: cc.grid } },
-        y: { stacked: true, ticks: { color: cc.ticks, callback: v => "$" + v }, grid: { color: cc.grid } },
+        // long labels (project paths) are clipped on the axis with "…"; the tooltip and the table keep the full text
+        x: { stacked: true, ticks: { color: cc.ticks, callback(value) { return clipLabel(String(this.getLabelForValue(value))); } }, grid: { color: cc.grid } },
+        // the axis always reaches the average line, even when every bar is below it (Today by project: projects vs the daily average)
+        y: { stacked: true, ...(avg != null ? { suggestedMax: avg * 1.08 } : {}), ticks: { color: cc.ticks, callback: v => "$" + v }, grid: { color: cc.grid } },
       },
     },
   });
 
-  const byModel = aggregateByModel(rows);
   if (doughnutChart) doughnutChart.destroy();
   doughnutChart = new Chart(document.getElementById("doughnut"), {
     type: "doughnut",
@@ -342,6 +466,120 @@ function render(view) {
       },
     },
   });
+}
+
+// bars → one dataset per model; `rows` carry modelBreakdowns
+function modelDatasets(rows) {
+  const allModels = aggregateByModel(rows).map(([m]) => m);
+  return allModels.map(m => ({
+    label: shortModel(m),
+    backgroundColor: colorFor(m),
+    data: rows.map(r => {
+      const b = (r.modelBreakdowns || []).find(x => x.modelName === m);
+      return b ? +b.cost.toFixed(4) : 0;
+    }),
+  }));
+}
+
+// ---- active time ------------------------------------------------------------------------------------------
+// Seconds of active work (gaps between events up to `idleMinutes` long; parallel sessions counted once), formatted
+// 45m · 3h 12m · 5d 3h (a day = 24 hours of activity). "—" = not measured; "≥ " = a period with some unmeasured days.
+const HAS_TIME = !!DATA.time;
+function fmtDuration(sec) {
+  const m = Math.round(sec / 60);
+  if (sec > 0 && m === 0) return "<1m";
+  if (m < 60) return `${m}m`;
+  if (m < 24 * 60) {
+    const h = Math.floor(m / 60), rest = m % 60;
+    return rest ? `${h}h ${rest}m` : `${h}h`;
+  }
+  const hours = Math.round(m / 60); // from a day up, minutes are rounded into the hours
+  const d = Math.floor(hours / 24), hh = hours % 24;
+  return hh ? `${d}d ${hh}h` : `${d}d`;
+}
+const timeText = t => (t && t.seconds != null ? (t.partial ? "≥ " : "") + fmtDuration(t.seconds) : "—");
+// time of one period row (a day, or a week / month that carries timeDays / days) → { seconds | null, cost, partial }
+// `cost` = the cost of just the days whose time was measured: the numerator of the rate (a day without time would skew it)
+function periodTime(r) {
+  if (typeof r.timeDays === "number") return { seconds: r.timeDays ? r.activeSeconds : null, cost: r.timeCost || 0, partial: r.timeDays < r.days };
+  const known = typeof r.activeSeconds === "number";
+  return { seconds: known ? r.activeSeconds : null, cost: known ? r.totalCost || 0 : 0, partial: false };
+}
+// total over several period rows
+function sumPeriodTimes(rows) {
+  const known = rows.map(periodTime);
+  const seconds = known.reduce((s, t) => s + (t.seconds ?? 0), 0);
+  const any = known.some(t => t.seconds != null);
+  return { seconds: any ? seconds : null, cost: known.reduce((s, t) => s + t.cost, 0), partial: known.some(t => t.seconds == null || t.partial) };
+}
+// real time over a date range (all projects united), from the per-day totals
+function rangeTime(start, end) {
+  const known = new Map(DATA.time.days);
+  const inRange = d => d >= start && d <= end;
+  const seconds = [...known].filter(([d]) => inRange(d)).reduce((s, [, v]) => s + v, 0);
+  const days = (DATA.daily || []).filter(r => inRange(r.date));
+  const measured = days.filter(r => known.has(r.date));
+  const cost = measured.reduce((s, r) => s + (r.totalCost || 0), 0);
+  return { seconds: measured.length || seconds ? seconds : null, cost, partial: measured.length < days.length };
+}
+// Rate = cost per hour of active work. Nothing sensible to divide by (time unmeasured or under a minute: 5 s of work and
+// $0.16 would read $115/h) → "—"; "~ " marks a partly measured period.
+const MIN_RATE_SECONDS = 60;
+const rateText = t => (t && t.seconds >= MIN_RATE_SECONDS ? (t.partial ? "~ " : "") + fmtUsd(t.cost / (t.seconds / 3600)) + "/h" : "—");
+const timeCells = t => (HAS_TIME ? `\n      <td class="num">${esc(timeText(t))}</td>\n      <td class="num">${esc(rateText(t))}</td>` : "");
+const columnCount = view => 7 + (HAS_TIME ? 2 : 0) + (view === "projects" ? 1 : 0);
+
+const totalRowHtml = (label, t, models, lastDate, time) => `
+      <td>${label}</td>
+      <td class="num">${fmtUsd(t.totalCost)}</td>
+      ${tokenCell(t.inputTokens)}
+      ${tokenCell(t.outputTokens)}
+      ${tokenCell(t.cacheCreationTokens)}
+      ${tokenCell(t.cacheReadTokens)}${timeCells(time)}
+      <td>${models.map(m => esc(shortModel(m))).join(", ")}</td>${lastDate === undefined ? "" : `\n      <td class="nowrap">${esc(lastDate)}</td>`}
+    `;
+
+// Controls that depend on the tab: the year drop-down (not on Today, hidden on Projects), the period chips (Projects only)
+function syncControls(view) {
+  yearSelect.disabled = view === "today" || view === "projects";
+  yearSelect.hidden = view === "projects";
+  document.getElementById("range-group").hidden = view !== "projects";
+  document.getElementById("th-last").hidden = view !== "projects";
+  document.getElementById("th-time").hidden = !HAS_TIME;
+  document.getElementById("th-rate").hidden = !HAS_TIME;
+}
+
+function render(view) {
+  syncControls(view);
+  if (view === "projects") return renderProjects();
+  const byProject = view === "today" && Array.isArray(DATA.projects);
+  const rows = byProject ? todayRows() : rowsForView(view);
+  const keyField = KEY_BY_VIEW[view];
+  const labelOf = byProject ? (r => maskName(r.label)) : (r => r[keyField]);
+  document.getElementById("th-first").textContent = byProject ? "Project" : "Period";
+
+  const totalCost = rows.reduce((s, r) => s + (r.totalCost || 0), 0);
+
+  const avg = renderStats(view, rows);
+
+  const periodLabel = { today: "today", daily: "day", weekly: "week", monthly: "month" }[view] || view;
+  document.getElementById("bar-title").textContent = byProject ? "Cost per project today (by model)" : `Cost per ${periodLabel} (by model)`;
+
+  // Today by project: the first bar is the Total of all projects, the one to compare with the average line
+  const totalBar = byProject && rows.length ? [{ modelBreakdowns: aggregateByModel(rows).map(([modelName, cost]) => ({ modelName, cost })) }] : [];
+  const bars = [...totalBar, ...rows];
+  drawCharts({
+    labels: [...totalBar.map(() => "Total"), ...rows.map(labelOf)],
+    datasets: modelDatasets(bars),
+    byModel: aggregateByModel(rows),
+    tooltipTitle: items => {
+      if (!items.length) return "";
+      if (!byProject) return items[0].label;
+      const i = items[0].dataIndex - totalBar.length;
+      return i < 0 ? "Total (all projects)" : maskName(rows[i].path || "(unattributed)");
+    },
+    avg, // always the value of the Avg card (on Today by project too: the daily average the Total bar is compared with)
+  });
 
   const tbody = document.querySelector("#tbl tbody");
   tbody.innerHTML = "";
@@ -349,31 +587,206 @@ function render(view) {
     // column sums for the current view and year; models ordered by what they cost
     const sum = k => rows.reduce((s, r) => s + (r[k] || 0), 0);
     const byCost = aggregateByModel(rows).map(([m]) => m);
-    const models = [...byCost, ...rows.flatMap(r => r.modelsUsed || []).filter(m => !byCost.includes(m))];
+    const models = [...new Set([...byCost, ...rows.flatMap(r => r.modelsUsed || [])])];
     const tr = document.createElement("tr");
     tr.className = "total";
-    tr.innerHTML = `
-      <td>Total</td>
-      <td class="num">${fmtUsd(totalCost)}</td>
-      <td class="num">${fmtNum(sum("inputTokens"))}</td>
-      <td class="num">${fmtNum(sum("outputTokens"))}</td>
-      <td class="num">${fmtNum(sum("cacheCreationTokens"))}</td>
-      <td class="num">${fmtNum(sum("cacheReadTokens"))}</td>
-      <td>${[...new Set(models)].map(m => esc(shortModel(m))).join(", ")}</td>
-    `;
+    const totalTime = !HAS_TIME ? undefined : byProject ? (() => { const t = todayStr(); return rangeTime(t, t); })() : sumPeriodTimes(rows);
+    tr.innerHTML = totalRowHtml("Total", { totalCost, inputTokens: sum("inputTokens"), outputTokens: sum("outputTokens"), cacheCreationTokens: sum("cacheCreationTokens"), cacheReadTokens: sum("cacheReadTokens") }, models, undefined, totalTime);
     tbody.appendChild(tr);
   }
-  [...rows].reverse().forEach(r => {
+  if (byProject && !rows.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="empty" colspan="${columnCount(view)}">No usage recorded today yet.</td>`;
+    tbody.appendChild(tr);
+  }
+  (byProject ? rows : [...rows].reverse()).forEach(r => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${esc(r[keyField])}</td>
+      <td${byProject ? ` title="${esc(r.path ? maskName(r.path) : "unattributed")}"` : ""}>${esc(labelOf(r))}</td>
       <td class="num">${fmtUsd(r.totalCost)}</td>
-      <td class="num">${fmtNum(r.inputTokens)}</td>
-      <td class="num">${fmtNum(r.outputTokens)}</td>
-      <td class="num">${fmtNum(r.cacheCreationTokens)}</td>
-      <td class="num">${fmtNum(r.cacheReadTokens)}</td>
+      ${tokenCell(r.inputTokens)}
+      ${tokenCell(r.outputTokens)}
+      ${tokenCell(r.cacheCreationTokens)}
+      ${tokenCell(r.cacheReadTokens)}${timeCells(byProject ? { seconds: r.activeSeconds, cost: r.timeCost, partial: false } : periodTime(r))}
       <td>${(r.modelsUsed || []).map(m => esc(shortModel(m))).join(", ")}</td>
     `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ---- Projects tab -----------------------------------------------------------------------------------------
+// Everything that was spent, per project, for the chosen period. The table is a tree by folder path: a folder's row
+// adds up everything below it, a single-child chain is folded into one row ("ok/code_p"), a folder that also has its
+// own usage lists it first, right under it, as ".. (this folder)", and rows that hold at least TREE_OPEN_SHARE of the spend start expanded.
+const RANGE_DAYS = { "1d": 1, "7d": 7, "30d": 30, "90d": 90, "1y": 365, all: 0 };
+const RANGE_TEXT = { "1d": "today", "7d": "last 7 days", "30d": "last 30 days", "90d": "last 90 days", "1y": "last 12 months", all: "all time" };
+const TREE_OPEN_SHARE = 0.2;
+const BARS_BEFORE_MORE = 12;
+let projectRange = "all";
+const treeToggles = new Map(); // row id → expanded?, what the user clicked (cleared when the period changes)
+
+function rangeStart(key) {
+  const days = RANGE_DAYS[key];
+  if (!days) return "";
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - (days - 1)).toLocaleDateString("sv-SE");
+}
+
+const emptyTotals = () => ({ totalCost: 0, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, seconds: 0, timeCost: 0, timeKnown: false, models: new Map(), lastDate: "" });
+function addTotals(a, b) {
+  a.totalCost += b.totalCost;
+  a.inputTokens += b.inputTokens;
+  a.outputTokens += b.outputTokens;
+  a.cacheCreationTokens += b.cacheCreationTokens;
+  a.cacheReadTokens += b.cacheReadTokens;
+  a.seconds += b.seconds || 0;
+  a.timeCost += b.timeCost || 0;
+  a.timeKnown ||= !!b.timeKnown;
+  for (const [m, c] of b.models) a.models.set(m, (a.models.get(m) || 0) + c);
+  if (b.lastDate > a.lastDate) a.lastDate = b.lastDate;
+  return a;
+}
+const totalsOfRow = r => addTotals(emptyTotals(), { ...r, seconds: r.activeSeconds ?? 0, timeCost: r.activeSeconds != null ? r.timeCost : 0, timeKnown: r.activeSeconds != null, models: new Map((r.modelBreakdowns || []).map(b => [b.modelName, b.cost || 0])) });
+
+// "~/ok/app" → ["~","ok","app"]; "/srv/a" → ["","srv","a"]; "C:\\x\\y" → ["C:","x","y"]
+const segmentsOf = p => { const [head, ...rest] = p.split(/[\\/]/); return [head, ...rest.filter(Boolean)]; };
+
+function buildTree(rows) {
+  const root = { seg: null, id: "", own: null, children: new Map() };
+  for (const r of rows) {
+    const parts = segmentsOf(r.path);
+    let node = root;
+    parts.forEach((seg, i) => {
+      let c = node.children.get(seg);
+      if (!c) node.children.set(seg, c = { seg, id: parts.slice(0, i + 1).join("/"), own: null, children: new Map() });
+      node = c;
+    });
+    node.own = r;
+  }
+  return root;
+}
+function nodeTotals(node) {
+  const t = node.own ? totalsOfRow(node.own) : emptyTotals();
+  for (const c of node.children.values()) addTotals(t, nodeTotals(c));
+  return (node.total = t);
+}
+// fold a chain of folders that have no usage of their own and a single child into one entry
+function fold(node, label) {
+  while (!node.own && node.children.size === 1) {
+    const [only] = node.children.values();
+    label += "/" + only.seg;
+    node = only;
+  }
+  return { node, label };
+}
+const ownEntry = (node, label) => ({ node: { id: node.id + "#own", own: node.own, children: new Map(), total: totalsOfRow(node.own) }, label });
+function childEntries(node) {
+  const out = [...node.children.values()].map(c => fold(c, c.seg)).sort((a, b) => b.node.total.totalCost - a.node.total.totalCost);
+  // the folder's own usage goes first, right under its parent, whatever it costs — it is the parent itself, not a sibling
+  if (node.own && node.children.size) out.unshift(ownEntry(node, ".. (this folder)"));
+  return out;
+}
+function topEntries(root, unattributed) {
+  const tops = [];
+  for (const c of root.children.values()) {
+    if (c.seg === "~") { // the home folder is not a project: its children are the top level
+      for (const k of c.children.values()) tops.push(fold(k, "~/" + k.seg));
+      if (c.own) tops.push(ownEntry(c, "~ (home folder)"));
+    } else {
+      const e = fold(c, c.seg);
+      tops.push({ ...e, label: e.label || "/" });
+    }
+  }
+  if (unattributed) tops.push({ node: { id: "#unattributed", own: unattributed, children: new Map(), total: totalsOfRow(unattributed) }, label: "(unattributed)" });
+  return tops.sort((a, b) => b.node.total.totalCost - a.node.total.totalCost);
+}
+function visibleTreeRows(flat) {
+  const root = buildTree(flat.filter(r => r.path !== ""));
+  nodeTotals(root);
+  const grand = flat.reduce((s, r) => s + r.totalCost, 0);
+  const out = [];
+  const walk = (entry, depth) => {
+    const kids = childEntries(entry.node);
+    const id = entry.node.id;
+    const open = kids.length > 0 && (treeToggles.has(id) ? treeToggles.get(id) : grand > 0 && entry.node.total.totalCost / grand >= TREE_OPEN_SHARE);
+    out.push({ id, depth, label: entry.label, path: entry.node.own ? entry.node.own.path : id, hasKids: kids.length > 0, open, total: entry.node.total });
+    if (open) kids.forEach(k => walk(k, depth + 1));
+  };
+  topEntries(root, flat.find(r => r.path === "")).forEach(e => walk(e, 0));
+  return out;
+}
+
+function renderProjects() {
+  const start = rangeStart(projectRange);
+  const end = todayStr();
+  const flat = projectRows(p => p.date >= start && p.date <= end);
+  document.getElementById("th-first").textContent = "Project";
+  document.getElementById("bar-title").textContent = `Cost per project, ${RANGE_TEXT[projectRange]} (by model)`;
+  document.querySelectorAll(".chip").forEach(b => b.classList.toggle("active", b.dataset.range === projectRange));
+
+  // cards: cheapest / average / most expensive project of the period (unattributed usage is not a project)
+  const named = flat.filter(r => r.path !== "");
+  let avgCost = null;
+  const set = (id, label, value) => {
+    document.getElementById("kpi-" + id + "-label").textContent = label;
+    document.getElementById("kpi-" + id).textContent = value;
+  };
+  if (!named.length) {
+    set("min", "Min cost / project", "—");
+    set("avg", "Avg cost / project", "—");
+    set("max", "Max cost / project", "—");
+  } else {
+    const lo = named.reduce((a, r) => (r.totalCost < a.totalCost ? r : a));
+    const hi = named.reduce((a, r) => (r.totalCost > a.totalCost ? r : a));
+    const avg = named.reduce((s, r) => s + r.totalCost, 0) / named.length;
+    avgCost = avg;
+    set("min", `Min cost / project · ${maskName(lo.label)}`, fmtUsd(lo.totalCost));
+    set("avg", `Avg cost / project · ${named.length} project${named.length === 1 ? "" : "s"}`, fmtUsd(avg));
+    set("max", `Max cost / project · ${maskName(hi.label)}`, fmtUsd(hi.totalCost));
+  }
+
+  // chart: the biggest projects (the folders as recorded, not the tree), the rest as one "+N more" bar
+  const top = flat.slice(0, BARS_BEFORE_MORE);
+  const rest = flat.slice(BARS_BEFORE_MORE);
+  const bars = top.map(r => ({ label: maskName(r.label), path: maskName(r.path || "(unattributed)"), row: r }));
+  if (rest.length) {
+    const merged = { modelBreakdowns: [...rest.reduce((m, r) => { r.modelBreakdowns.forEach(b => m.set(b.modelName, (m.get(b.modelName) || 0) + b.cost)); return m; }, new Map())].map(([modelName, cost]) => ({ modelName, cost })) };
+    bars.push({ label: `+${rest.length} more`, path: `${rest.length} more projects`, row: merged });
+  }
+  drawCharts({
+    labels: bars.map(b => b.label),
+    datasets: modelDatasets(bars.map(b => b.row)),
+    byModel: aggregateByModel(flat),
+    tooltipTitle: items => (items.length ? bars[items[0].dataIndex].path : ""),
+    avg: avgCost,
+    avgLabel: "Avg / project",
+  });
+
+  renderProjectTable(flat);
+}
+
+function renderProjectTable(flat) {
+  const tbody = document.querySelector("#tbl tbody");
+  tbody.innerHTML = "";
+  if (!flat.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="empty" colspan="${columnCount("projects")}">No usage in this period.</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
+  const all = flat.reduce((t, r) => addTotals(t, totalsOfRow(r)), emptyTotals());
+  const totalTr = document.createElement("tr");
+  totalTr.className = "total";
+  totalTr.innerHTML = totalRowHtml("Total", all, [...all.models.entries()].sort((a, b) => b[1] - a[1]).map(([m]) => m), all.lastDate, HAS_TIME ? rangeTime(rangeStart(projectRange), todayStr()) : undefined);
+  tbody.appendChild(totalTr);
+  visibleTreeRows(flat).forEach(r => {
+    const tr = document.createElement("tr");
+    tr.className = "node" + (r.hasKids ? " has-kids" : "");
+    const models = [...r.total.models.entries()].sort((a, b) => b[1] - a[1]).map(([m]) => m);
+    const mark = r.hasKids ? (r.open ? "▾" : "▸") : "";
+    tr.innerHTML = totalRowHtml(`<span class="twisty">${mark}</span>${esc(maskName(r.label))}`, r.total, models, r.total.lastDate, { seconds: r.total.timeKnown ? r.total.seconds : null, cost: r.total.timeCost, partial: false })
+      .replace("<td>", `<td title="${esc(maskName(r.path))}" style="padding-left:${10 + r.depth * 18}px">`); // padding (not margin): wrapped names stay indented
+    if (r.hasKids) tr.addEventListener("click", () => { treeToggles.set(r.id, !r.open); renderProjectTable(flat); });
     tbody.appendChild(tr);
   });
 }
@@ -396,13 +809,20 @@ document.querySelectorAll(".tab").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
     btn.classList.add("active");
-    yearSelect.disabled = btn.dataset.view === "today";
-    render(btn.dataset.view);
+    render(btn.dataset.view); // also syncs the year drop-down / period chips for this tab
   });
 });
 
-// initial state: Today is active by default, so disable the year selector
-yearSelect.disabled = true;
+document.querySelectorAll(".chip").forEach(btn => {
+  btn.addEventListener("click", () => {
+    projectRange = btn.dataset.range;
+    treeToggles.clear();
+    render("projects");
+  });
+});
+
+// the Projects tab needs per-project data (built-in log reader, "projects": "on")
+if (!Array.isArray(DATA.projects)) document.getElementById("tab-projects").hidden = true;
 
 function historyLabel() {
   const h = DATA.history;
@@ -416,7 +836,7 @@ function priceLabel() {
   const old = p.ageDays >= 7 ? " — outdated, go online to refresh" : "";
   return " · prices as of " + p.asOf + how + old;
 }
-document.getElementById("sub").textContent = "Generated at " + DATA.generatedAt + " · data from local Claude Code logs" + (DATA.source ? " · read via " + DATA.source : "") + historyLabel() + priceLabel();
+document.getElementById("sub").textContent = "Generated at " + fmtGenerated(DATA.generatedAt) + " · data from local Claude Code logs" + (DATA.source ? " · read via " + DATA.source : "") + historyLabel() + priceLabel();
 if (DATA.unpriced && DATA.unpriced.length) {
   const n = document.getElementById("notice");
   n.textContent = "No price known for: " + DATA.unpriced.join(", ") + ". Their cost is counted as $0 — add rates under \"prices\" in config.json or update the package.";
@@ -443,6 +863,25 @@ applyTheme(savedTheme || "dark");
 document.getElementById("theme-toggle").addEventListener("click", () => {
   const next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
   applyTheme(next);
+  render(currentView());
+});
+
+// Privacy toggle: eye open = names shown (default, not remembered), eye closed = names masked. Pointless without project data.
+const privacyBtn = document.getElementById("privacy-toggle");
+privacyBtn.hidden = !Array.isArray(DATA.projects);
+function applyPrivacy() {
+  document.getElementById("icon-eye").style.display = privacy ? "none" : "";
+  document.getElementById("icon-eye-off").style.display = privacy ? "" : "none";
+  privacyBtn.classList.toggle("on", privacy);
+  privacyBtn.setAttribute("aria-pressed", String(privacy));
+  const label = privacy ? "Show project names" : "Hide project names";
+  privacyBtn.title = label;
+  privacyBtn.setAttribute("aria-label", label);
+}
+applyPrivacy();
+privacyBtn.addEventListener("click", () => {
+  privacy = !privacy;
+  applyPrivacy();
   render(currentView());
 });
 

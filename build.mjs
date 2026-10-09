@@ -111,14 +111,19 @@ export async function main(argv, deps = {}) {
       log,
       ...extra,
     });
-  const { daily, unpriced, source, prices, history } = await loadDaily({
+  const { daily, unpriced, source, prices, history, projects, time } = await loadDaily({
     source: opts.source ?? config.source,
-    readLogs: readLogsDep,
+    readLogs: () => readLogsDep({ projects: config.projects === "on", time: config.time === "on", idleMinutes: config.idleMinutes }),
     fetchCcusage: fetch,
     getPrices,
     history: { enabled: config.history === "on", path: historyPath, reset: Boolean(opts.resetHistory), now },
+    projects: { enabled: config.projects === "on", now },
+    time: { enabled: config.time === "on", idleMinutes: config.idleMinutes },
     log,
   });
+  // active seconds of each day, so that weekly / monthly rows can add them up
+  const seconds = new Map(time?.days ?? []);
+  for (const row of daily) if (seconds.has(row.date)) row.activeSeconds = seconds.get(row.date);
   const periods = buildPeriods(daily, { weekStart: config.weekStart });
   const payload = {
     daily: periods.daily,
@@ -130,6 +135,8 @@ export async function main(argv, deps = {}) {
     unpriced,
     prices,
     history,
+    projects,
+    time,
   };
   writeAtomic(out, renderHtml(template, payload, userName(), chartJs));
 

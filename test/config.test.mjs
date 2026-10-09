@@ -12,7 +12,7 @@ const write = obj => {
 };
 
 test("defaults when the file is absent; user values merge over them", () => {
-  assert.deepEqual(loadConfig("/nonexistent"), { weekStart: "auto", source: "auto", prices: {}, priceRefresh: "daily", priceUrl: null, history: "on" });
+  assert.deepEqual(loadConfig("/nonexistent"), { weekStart: "auto", source: "auto", prices: {}, priceRefresh: "daily", priceUrl: null, history: "on", projects: "on", time: "on", idleMinutes: 10 });
   assert.equal(loadConfig(write({ source: "ccusage" })).source, "ccusage");
 });
 
@@ -23,6 +23,11 @@ test("rejects bad source, bad prices and malformed JSON with a message that name
   assert.throws(() => loadConfig(write({ prices: { m: { input: -1, output: 2, cacheWrite: 3, cacheRead: 4 } } })), /prices\["m"\]/);
   assert.throws(() => loadConfig(write({ priceRefresh: "hourly" })), /"priceRefresh" must be "daily" or "off"/);
   assert.throws(() => loadConfig(write({ history: "maybe" })), /"history" must be "on" or "off"/);
+  assert.throws(() => loadConfig(write({ projects: 1 })), /"projects" must be "on" or "off"/);
+  assert.throws(() => loadConfig(write({ time: "yes" })), /"time" must be "on" or "off"/);
+  assert.throws(() => loadConfig(write({ idleMinutes: 0 })), /"idleMinutes" must be a number between 1 and 240/);
+  assert.throws(() => loadConfig(write({ idleMinutes: "10" })), /"idleMinutes"/);
+  assert.equal(loadConfig(write({ idleMinutes: 30 })).idleMinutes, 30);
   assert.throws(() => loadConfig(write({ priceUrl: "ftp://x" })), /"priceUrl" must be an http\(s\) URL/);
   assert.equal(loadConfig(write({ priceRefresh: "off", priceUrl: "https://mirror.example/prices.json" })).priceRefresh, "off");
   assert.throws(() => loadConfig(write("{nope")), /not valid JSON/);
