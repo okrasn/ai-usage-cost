@@ -2,7 +2,7 @@
 
 > Formerly **ccusage-ui-dashboard** (npm releases up to 1.2.0). The old package is deprecated and points here; only the name changes — same options, same `config.json`, same `history.json`.
 
-A local dashboard for **Claude Code** usage and cost — by day, week, month, project, session, git branch and pull request — as **one offline HTML file**. It also tells you how long you actually worked (`$/hour`), how much the prompt cache saved, and keeps your history past Claude Code's 30-day transcript cleanup.
+A local dashboard for **Claude Code** usage and cost — by day, week, month, project and session (with its git branch and pull requests) — as **one offline HTML file**. It also tells you how long you actually worked (`$/hour`), how much the prompt cache saved, and keeps your history past Claude Code's 30-day transcript cleanup.
 
 > **Main feature:** type `/<prefix>-usage` inside any Claude Code session and get an inline cost & token summary _right in the chat_, plus the full visual dashboard opens in your browser — all without leaving your terminal.
 
