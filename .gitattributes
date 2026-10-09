@@ -1,0 +1,5 @@
+# One line ending everywhere: the tests and the page script look for "\n", and a CRLF checkout (Windows default)
+# breaks them; a CRLF shebang would also break bin/install.mjs on Linux and macOS.
+* text=auto eol=lf
+*.jpg binary
+*.png binary

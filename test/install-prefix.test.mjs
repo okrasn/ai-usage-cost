@@ -3,10 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 // runs the real bin/install.mjs against a throw-away Claude config dir and reports which <prefix>-usage skills appeared
-const BIN = new URL("../bin/install.mjs", import.meta.url).pathname;
+const BIN = fileURLToPath(new URL("../bin/install.mjs", import.meta.url));
 function run(args, env = {}, setup = () => {}) {
   const dir = mkdtempSync(join(tmpdir(), "ccud-prefix-"));
   setup(dir);

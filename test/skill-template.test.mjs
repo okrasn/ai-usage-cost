@@ -3,9 +3,10 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { installSkill } from "../lib/install.mjs";
 
-const SRC = new URL("..", import.meta.url).pathname;
+const SRC = fileURLToPath(new URL("..", import.meta.url));
 const template = readFileSync(join(SRC, "skill", "SKILL.md"), "utf8");
 
 test("the shipped skill template is manual-only and uses the documented !`cmd` form", () => {

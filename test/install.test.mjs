@@ -128,4 +128,6 @@ test("installedPrefixes sees skills and legacy commands we installed, and ignore
 test("buildCommandLine: tilde only for the default POSIX location", () => {
   assert.equal(buildCommandLine("/x/dashboard", { useTilde: true }), "node ~/.claude/dashboard/build.mjs");
   assert.equal(buildCommandLine("/x/dashboard"), 'node "/x/dashboard/build.mjs"');
+  // a Windows location keeps forward slashes only (what path.join returns there is backslashes)
+  assert.equal(buildCommandLine("C:\\Users\\me\\.claude\\dashboard"), 'node "C:/Users/me/.claude/dashboard/build.mjs"');
 });
